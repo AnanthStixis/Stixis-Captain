@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>12</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <PackageId>Stixis.Captain.Sdk</PackageId>
+    <Version>0.1.0</Version>
+    <Description>Thin typed .NET client for the Stixis Captain AI governance gateway</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Stixis.Captain.Sdk.Tests" />
+  </ItemGroup>
+
+</Project>

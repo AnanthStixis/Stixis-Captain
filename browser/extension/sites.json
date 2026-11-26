@@ -1,0 +1,9 @@
+{
+  "_note": "Sites the extension watches. Selectors are OPTIONAL hints; without them the generic detector is used (Enter or the form's submit inside a textbox). NO site below has been verified against the live website: AI sites change their pages often. Verify and adjust before relying on a site.",
+  "sites": {
+    "chatgpt.com": { "verified": false },
+    "chat.openai.com": { "verified": false },
+    "claude.ai": { "verified": false },
+    "gemini.google.com": { "verified": false }
+  }
+}

@@ -1,0 +1,69 @@
+[project]
+name = "captain"
+version = "0.0.1"
+description = "Stixis Captain — Captain Core and integrations"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic==2.9.2",
+  "httpx==0.28.1",          # OPA + guard model clients
+  "cryptography==44.0.0",   # ledger signing (Ed25519 locally; KMS in prod)
+  "PyJWT==2.10.1",          # workload OIDC token verification
+  "rfc8785==0.1.4",         # canonical JSON for ledger hashing
+  "sqlalchemy==2.0.36",
+  "alembic==1.14.0",
+  "psycopg[binary]==3.2.3",
+  "fastapi==0.115.6",       # HTTP Core API (/core/v1)
+  "uvicorn==0.34.0",
+  "jsonschema==4.23.0",     # tool argument validation (Model/Tool Registry)
+  "openpyxl==3.1.5",        # XLSX report export
+]
+
+[project.optional-dependencies]
+aws = ["boto3==1.35.86"]             # S3 Object Lock anchors, KMS signing
+azure = ["azure-storage-blob==12.24.0", "azure-identity==1.19.0", "azure-keyvault-keys==4.10.0"]
+presidio = [
+  "presidio-analyzer==2.2.355",  # also needs a spaCy model, e.g. en_core_web_lg
+]
+dev = [
+  "pytest==8.3.3",
+  "ruff==0.8.4",
+  "mypy==1.13.0",
+  "types-jsonschema==4.23.0.20241208",
+  "types-openpyxl==3.1.5.20241225",
+  "openai==1.58.1",  # SDK compatibility tests for the API Gateway
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["captain*"]
+
+[tool.setuptools.package-data]
+captain = ["core/reporting/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: needs local PostgreSQL (backend/.env) and the OPA binary (tools/opa)"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+ignore = ["S101"]  # assert is fine in tests
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106"]  # fixed test credentials
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["boto3", "boto3.*", "azure.*"]  # optional cloud extras, not installed by default
+ignore_missing_imports = true

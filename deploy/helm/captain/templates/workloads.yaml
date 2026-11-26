@@ -1,0 +1,104 @@
+{{- /* One Deployment + Service per Captain process. Commands match the README. */ -}}
+{{- $root := . }}
+{{- $apps := dict
+  "gateway" (dict "module" "captain.api.gateway_main:create_gateway_app_from_env" "port" .Values.ports.gateway "replicas" .Values.replicas.gateway)
+  "core"    (dict "module" "captain.api.core_http:create_app_from_env" "port" .Values.ports.core "replicas" .Values.replicas.core)
+  "admin"   (dict "module" "captain.api.admin_main:create_admin_app_from_env" "health" "/admin/v1/health" "port" .Values.ports.admin "replicas" .Values.replicas.admin)
+  "mcp"     (dict "module" "captain.api.mcp_main:create_mcp_app_from_env" "port" .Values.ports.mcp "replicas" .Values.replicas.mcp) }}
+{{- define "captain.podLabels" -}}
+app.kubernetes.io/name: captain
+app.kubernetes.io/component: {{ .component }}
+{{- if .root.Values.azure.enabled }}
+azure.workload.identity/use: "true"
+{{- end }}
+{{- end }}
+{{- define "captain.secretsVolume" -}}
+{{- if .Values.azure.enabled }}
+# Mounting the Key Vault CSI volume is what syncs Key Vault secrets into existingSecret.
+volumes:
+  - name: kv-secrets
+    csi:
+      driver: secrets-store.csi.k8s.io
+      readOnly: true
+      volumeAttributes: { secretProviderClass: captain-secrets }
+{{- end }}
+{{- end }}
+{{- define "captain.secretsMount" -}}
+{{- if .Values.azure.enabled }}
+volumeMounts:
+  - { name: kv-secrets, mountPath: /mnt/secrets, readOnly: true }
+{{- end }}
+{{- end }}
+{{- range $name, $a := $apps }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: captain-{{ $name }}
+  labels: { app.kubernetes.io/name: captain, app.kubernetes.io/component: {{ $name }} }
+spec:
+  replicas: {{ $a.replicas }}
+  selector:
+    matchLabels: { app.kubernetes.io/name: captain, app.kubernetes.io/component: {{ $name }} }
+  template:
+    metadata:
+      labels: {{- include "captain.podLabels" (dict "root" $root "component" $name) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $root.Values.serviceAccount.name }}
+      securityContext: { runAsNonRoot: true, runAsUser: 10001 }
+      {{- include "captain.secretsVolume" $root | nindent 6 }}
+      containers:
+        - name: {{ $name }}
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["python", "-m", "uvicorn", "--factory", "{{ $a.module }}", "--host", "0.0.0.0", "--port", "{{ $a.port }}"]
+          ports: [{ containerPort: {{ $a.port }} }]
+          envFrom: [{ secretRef: { name: {{ $root.Values.existingSecret }} } }]
+          env:
+            {{- range $k, $v := $root.Values.env }}
+            - { name: {{ $k }}, value: {{ $v | quote }} }
+            {{- end }}
+          {{- include "captain.secretsMount" $root | nindent 10 }}
+          readinessProbe: { httpGet: { path: {{ default "/health" $a.health }}, port: {{ $a.port }} }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: {{ default "/health" $a.health }}, port: {{ $a.port }} }, periodSeconds: 10, failureThreshold: 6 }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
+          resources: {{ toYaml $root.Values.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: captain-{{ $name }}
+spec:
+  selector: { app.kubernetes.io/name: captain, app.kubernetes.io/component: {{ $name }} }
+  ports: [{ port: {{ $a.port }}, targetPort: {{ $a.port }} }]
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: captain-worker
+  labels: { app.kubernetes.io/name: captain, app.kubernetes.io/component: worker }
+spec:
+  replicas: {{ .Values.replicas.worker }}
+  strategy: { type: Recreate } # never two ledger writers at once
+  selector:
+    matchLabels: { app.kubernetes.io/name: captain, app.kubernetes.io/component: worker }
+  template:
+    metadata:
+      labels: {{- include "captain.podLabels" (dict "root" $root "component" "worker") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      securityContext: { runAsNonRoot: true, runAsUser: 10001 }
+      {{- include "captain.secretsVolume" $root | nindent 6 }}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["python", "-m", "captain.workers"]
+          envFrom: [{ secretRef: { name: {{ .Values.existingSecret }} } }]
+          env:
+            {{- range $k, $v := .Values.env }}
+            - { name: {{ $k }}, value: {{ $v | quote }} }
+            {{- end }}
+          {{- include "captain.secretsMount" $root | nindent 10 }}
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
+          resources: {{ toYaml .Values.resources | nindent 12 }}

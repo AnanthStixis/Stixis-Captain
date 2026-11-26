@@ -1,0 +1,11 @@
+{
+  "name": "captain-browser-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Stixis Captain browser extension (Chrome/Edge, Manifest V3): pre-submit checks on AI websites",
+  "scripts": {
+    "test": "node --test test/core.test.js",
+    "build": "node build.mjs"
+  }
+}

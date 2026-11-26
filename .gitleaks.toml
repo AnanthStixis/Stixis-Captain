@@ -1,0 +1,10 @@
+# Extend the default gitleaks rules; allow only the clearly fake values used as test
+# fixtures for Captain's own secret detection.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Captain test fixtures (fake credentials used to test secret detection)"
+regexes = [
+  '''AKIAABCDEFGHIJKLMNOP''',
+]

@@ -1,0 +1,84 @@
+# Pilot values. Everything marked CHANGE must be set for your cluster.
+image:
+  repository: registry.example.com/stixis/captain-backend # CHANGE
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# Secrets are never in this file. Create the Secret yourself (External Secrets, Vault
+# injector, or `kubectl create secret generic`) with these keys:
+#   CAPTAIN_DATABASE_URL, CAPTAIN_KEY_PEPPER, CAPTAIN_LEDGER_KEY, and the provider keys the
+#   gateway needs (for example OPENAI_API_KEY), plus the SSO client secret for the Admin API.
+existingSecret: captain-secrets
+
+env:
+  CAPTAIN_OPA_URL: http://captain-opa:8181
+  CAPTAIN_REQUIRE_BUDGET: "true"
+
+replicas:
+  gateway: 2
+  core: 2
+  admin: 1
+  mcp: 2
+  worker: 1 # the ledger worker is a single writer: keep it at 1
+
+ports:
+  gateway: 8000
+  core: 8080
+  admin: 8100
+  mcp: 8300
+
+# Every Captain pod runs as this service account. On Azure it is federated to the managed
+# identity OpenTofu creates (workload identity): no Azure credentials in any Secret.
+serviceAccount:
+  name: captain
+
+# Azure (deploy/opentofu/azure). Paste the `helm_values` output of `tofu apply` here.
+azure:
+  enabled: false
+  tenantId: ""
+  workloadIdentityClientId: ""
+  keyVaultName: ""
+  # Kubernetes Secret key -> Key Vault secret name. Synced by the Key Vault CSI driver into
+  # `existingSecret`. OpenTofu creates the first two; add provider keys, the SSO client
+  # secret and the session secret to Key Vault yourself and list them here.
+  secrets:
+    CAPTAIN_DATABASE_URL: captain-database-url
+    CAPTAIN_KEY_PEPPER: captain-key-pepper
+
+# Policy decision point. Runs ONLY a signed bundle (ADR-003): build it with
+#   python -m captain.policy_bundle --policies ../policies --key signing.pem --out bundle.tar.gz
+# then: kubectl create configmap captain-policy-bundle --from-file=bundle.tar.gz
+#       kubectl create configmap captain-policy-key --from-file=public.pem
+opa:
+  image: openpolicyagent/opa:1.0.0-static
+  replicas: 2
+  bundleConfigMap: captain-policy-bundle
+  verificationKeyConfigMap: captain-policy-key
+
+resources:
+  requests: { cpu: 250m, memory: 384Mi }
+  limits: { cpu: "1", memory: 1Gi }
+
+networkPolicy:
+  enabled: true
+  # Who may call the gateway (the pilot's developer / application network).
+  gatewayIngressFrom:
+    - ipBlock: { cidr: 10.0.0.0/8 } # CHANGE
+  adminIngressFrom:
+    - ipBlock: { cidr: 10.0.0.0/8 } # CHANGE
+  # The ONLY places the gateway may send traffic outside the cluster: model providers.
+  # Pods outside Captain get no route to providers, which is what makes "no developer-held
+  # provider keys" enforceable. List provider egress as CIDRs (or use your egress proxy's).
+  providerEgress:
+    - ipBlock: { cidr: 0.0.0.0/0, except: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"] } # CHANGE: narrow to provider ranges / egress proxy
+  databaseCidr: 10.1.0.0/24 # CHANGE: where PostgreSQL lives
+  # Azure only: every pod signs with Key Vault, writes anchors to Storage and gets tokens
+  # from Entra ID. NetworkPolicy cannot name FQDNs, so narrow this at your egress firewall
+  # (Azure Firewall FQDN tags AzureKeyVault, Storage, AzureActiveDirectory).
+  azureEgress:
+    - ipBlock: { cidr: 0.0.0.0/0, except: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"] } # CHANGE
+  # MCP proxy: the upstream MCP servers it may call (registered in Models & tools).
+  mcpUpstreamEgress:
+    - ipBlock: { cidr: 10.0.0.0/8 } # CHANGE: your MCP servers
+  mcpIngressFrom:
+    - ipBlock: { cidr: 10.0.0.0/8 } # CHANGE: agents / developer machines

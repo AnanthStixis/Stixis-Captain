@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "captainUrl": { "title": "Captain address", "description": "https://captain.example.com", "type": "string" },
+    "captainKey": { "title": "Captain key for this user", "description": "A virtual key issued for this employee or device.", "type": "string" },
+    "failMode": { "title": "If Captain is unreachable", "type": "string", "enum": ["closed", "open"] }
+  }
+}

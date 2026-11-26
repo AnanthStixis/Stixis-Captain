@@ -1,0 +1,20 @@
+{
+  "name": "@stixis/captain-sdk",
+  "version": "0.1.0",
+  "description": "Thin typed JavaScript/TypeScript client for the Stixis Captain AI governance gateway",
+  "type": "module",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test dist-test/test/client.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "typescript": "5.6.3"
+  }
+}

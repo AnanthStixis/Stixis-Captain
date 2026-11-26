@@ -1,0 +1,9 @@
+# Real client settings and local OpenTofu files stay out of git.
+clients/*
+!clients/example.tfvars
+!clients/example.backend.hcl
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.lock.hcl.bak

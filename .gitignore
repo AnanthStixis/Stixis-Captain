@@ -1,0 +1,33 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+node_modules/
+dist/
+*.egg-info/
+
+# Confidential source documents — kept local only
+Ref_Doc/
+
+# Local tool binaries
+tools/
+
+# Local development secrets and keys (python -m captain.devsetup)
+backend/.dev/
+
+# Console build output and dependencies
+console/node_modules/
+console/dist/
+
+# VS Code companion package
+*.vsix
+
+# .NET build output
+sdk/dotnet/**/bin/
+sdk/dotnet/**/obj/
+
+# browser extension build output
+browser/extension/dist/

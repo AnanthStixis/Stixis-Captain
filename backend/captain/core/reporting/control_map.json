@@ -1,0 +1,34 @@
+{
+  "version": "controls-1.0",
+  "note": "Event-to-control mapping proposed for review. The AI Architect owns the final clause-level mapping (CTO review, Problem 5); change this file through the policy change process and bump the version.",
+  "frameworks": {
+    "NIST_AI_RMF": {
+      "name": "NIST AI Risk Management Framework 1.0",
+      "controls": [
+        {"id": "GOVERN", "name": "Policies applied, versioned and changed under control", "events": ["policy.changed", "register.changed", "budget.defined", "key.issued", "key.revoked", "key.rotated", "registry.changed"]},
+        {"id": "MAP", "name": "Register context attached to every AI call", "events": ["call.allowed", "call.masked", "call.refused", "call.observed"]},
+        {"id": "MEASURE", "name": "Guardrail results, usage and alerts measured", "events": ["call.masked", "usage.settled", "alert.raised"], "refusal_reasons": ["INJECTION_DETECTED", "SECRET_DETECTED", "PII_REDACTED"]},
+        {"id": "MANAGE", "name": "Refusals, approvals, overrides and kill switch", "events": ["call.refused", "tool.held", "approval.decided", "approval.escalated", "killswitch.changed", "budget.override"]}
+      ]
+    },
+    "ISO_42001": {
+      "name": "ISO/IEC 42001 AI management system (control areas)",
+      "controls": [
+        {"id": "ISO42001-OPERATION", "name": "Operation of AI system controls", "events": ["call.allowed", "call.masked", "call.refused", "tool.held", "tool.executed"]},
+        {"id": "ISO42001-MONITORING", "name": "Monitoring, measurement and records of use", "events": ["usage.settled", "call.observed", "alert.raised"]},
+        {"id": "ISO42001-INCIDENTS", "name": "Incident and exception handling", "events": ["alert.raised", "killswitch.changed", "budget.override"], "refusal_reasons": ["INJECTION_DETECTED", "SECRET_DETECTED", "KILL_SWITCH_ACTIVE"]},
+        {"id": "ISO42001-CHANGE", "name": "Change control of policies, register and credentials", "events": ["policy.changed", "register.changed", "registry.changed", "key.issued", "key.revoked", "key.rotated"]},
+        {"id": "ISO42001-SUPPLIER", "name": "Model provider (supplier) use and cost", "events": ["usage.settled", "registry.changed"]}
+      ]
+    },
+    "EU_AI_ACT": {
+      "name": "EU AI Act (Regulation (EU) 2024/1689)",
+      "controls": [
+        {"id": "ART12", "name": "Art. 12 Record-keeping (automatic logging)", "events": ["call.allowed", "call.masked", "call.refused", "call.observed", "usage.settled", "tool.held", "tool.executed"]},
+        {"id": "ART14", "name": "Art. 14 Human oversight", "events": ["tool.held", "approval.decided", "approval.escalated", "killswitch.changed"]},
+        {"id": "ART15", "name": "Art. 15 Accuracy, robustness and cybersecurity", "events": ["call.masked", "alert.raised"], "refusal_reasons": ["INJECTION_DETECTED", "SECRET_DETECTED", "TOOL_ARGUMENTS_INVALID", "CONTROL_UNAVAILABLE"]},
+        {"id": "ART26", "name": "Art. 26 Deployer obligations (monitoring, log retention)", "events": ["usage.settled", "alert.raised", "call.observed", "budget.override"]}
+      ]
+    }
+  }
+}

@@ -1,0 +1,89 @@
+{{- if .Values.networkPolicy.enabled }}
+# Default deny for every Captain pod, then open only what each process needs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: captain-default-deny
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: captain } }
+  policyTypes: [Ingress, Egress]
+---
+# Gateway: callers in, providers + Core/OPA/database out.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: captain-gateway
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: captain, app.kubernetes.io/component: gateway } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: {{ toYaml .Values.networkPolicy.gatewayIngressFrom | nindent 8 }}
+      ports: [{ port: {{ .Values.ports.gateway }} }]
+  egress:
+    - to: [{ namespaceSelector: {}, podSelector: { matchLabels: { k8s-app: kube-dns } } }]
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: opa } } }]
+      ports: [{ port: 8181 }]
+    - to: [{ ipBlock: { cidr: {{ .Values.networkPolicy.databaseCidr }} } }]
+      ports: [{ port: 5432 }]
+    - to: {{ toYaml .Values.networkPolicy.providerEgress | nindent 8 }}
+      ports: [{ port: 443 }]
+---
+# Core API, Admin API, worker: no internet. Database and OPA only (Admin also takes callers,
+# and reaches the SSO provider through the cluster's egress proxy or an added rule).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: captain-internal
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [captain] }
+      - { key: app.kubernetes.io/component, operator: In, values: [core, admin, worker] }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: {{ toYaml .Values.networkPolicy.adminIngressFrom | nindent 8 }}
+      ports: [{ port: {{ .Values.ports.admin }} }]
+  egress:
+    - to: [{ namespaceSelector: {}, podSelector: { matchLabels: { k8s-app: kube-dns } } }]
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: opa } } }]
+      ports: [{ port: 8181 }]
+    - to: [{ ipBlock: { cidr: {{ .Values.networkPolicy.databaseCidr }} } }]
+      ports: [{ port: 5432 }]
+---
+# MCP proxy: agents in, registered MCP servers + Core/OPA/database out.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: captain-mcp
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: captain, app.kubernetes.io/component: mcp } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: {{ toYaml .Values.networkPolicy.mcpIngressFrom | nindent 8 }}
+      ports: [{ port: {{ .Values.ports.mcp }} }]
+  egress:
+    - to: [{ namespaceSelector: {}, podSelector: { matchLabels: { k8s-app: kube-dns } } }]
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: opa } } }]
+      ports: [{ port: 8181 }]
+    - to: [{ ipBlock: { cidr: {{ .Values.networkPolicy.databaseCidr }} } }]
+      ports: [{ port: 5432 }]
+    - to: {{ toYaml .Values.networkPolicy.mcpUpstreamEgress | nindent 8 }}
+{{- if .Values.azure.enabled }}
+---
+# Azure: every Captain pod signs ledger entries in Key Vault, writes anchors to Storage
+# and gets workload-identity tokens from Entra ID (HTTPS only).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: captain-azure
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: captain } }
+  policyTypes: [Egress]
+  egress:
+    - to: {{ toYaml .Values.networkPolicy.azureEgress | nindent 8 }}
+      ports: [{ port: 443 }]
+{{- end }}
+{{- end }}

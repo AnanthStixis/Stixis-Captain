@@ -1,0 +1,58 @@
+{
+  "bundle": {
+    "name": "captain-tier-policies",
+    "version": "0.1.0"
+  },
+  "tiers": {
+    "TIER_1": {
+      "secrets": "block",
+      "injection": "block",
+      "injection_threshold": 0.5,
+      "pii": "mask",
+      "approval_autonomy": [
+        "A3",
+        "A4"
+      ],
+      "approval_scope": "all",
+      "max_output_tokens": 4096,
+      "streaming": "buffer"
+    },
+    "TIER_2": {
+      "secrets": "block",
+      "injection": "block",
+      "injection_threshold": 0.5,
+      "pii": "mask",
+      "approval_autonomy": [
+        "A3",
+        "A4"
+      ],
+      "approval_scope": "all",
+      "max_output_tokens": 4096,
+      "streaming": "chunk"
+    },
+    "TIER_3": {
+      "secrets": "log",
+      "injection": "log",
+      "injection_threshold": 0.7,
+      "pii": "mask",
+      "approval_autonomy": [
+        "A3",
+        "A4"
+      ],
+      "approval_scope": "high_impact",
+      "max_output_tokens": 8192,
+      "streaming": "passthrough_async_check"
+    },
+    "TIER_4": {
+      "secrets": "log",
+      "injection": "off",
+      "injection_threshold": 1.0,
+      "pii": "log",
+      "approval_autonomy": [],
+      "approval_scope": "none",
+      "max_output_tokens": 16384,
+      "streaming": "passthrough"
+    }
+  },
+  "tools": {}
+}

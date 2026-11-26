@@ -1,0 +1,7 @@
+# Policy changes need the named policy signers (CTO R3).
+# Placeholder team names: replace with the real GitHub teams once the repository exists.
+# Two-person approval for Tier 1 policy changes is enforced by branch protection
+# ("Require 2 approving reviews" + "Require review from Code Owners") on the main branch.
+/policies/                       @stixis/captain-policy-signers
+/backend/captain/core/policy/    @stixis/captain-policy-signers
+/backend/captain/core/ledger/    @stixis/captain-architects

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Captain settings</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; max-width: 460px; margin: 24px auto; padding: 0 16px; color: #1a1a1a; }
+      label { display: block; margin: 14px 0 4px; font-weight: 600; }
+      input, select { width: 100%; padding: 8px; box-sizing: border-box; }
+      button { margin-top: 16px; padding: 8px 16px; }
+      small { color: #555; }
+      #status { margin-top: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Captain</h1>
+    <p><small>If your company deployed this extension, these settings are managed and cannot be changed here.</small></p>
+    <label for="url">Captain address</label>
+    <input id="url" type="url" placeholder="https://captain.example.com" />
+    <label for="key">Your Captain key</label>
+    <input id="key" type="password" autocomplete="off" />
+    <small>Stored in this browser profile. Never share it.</small>
+    <label for="fail">If Captain cannot be reached</label>
+    <select id="fail">
+      <option value="closed">Do not send the message (recommended)</option>
+      <option value="open">Send it anyway</option>
+    </select>
+    <button id="save">Save</button>
+    <div id="status" role="status"></div>
+    <script src="options.js"></script>
+  </body>
+</html>

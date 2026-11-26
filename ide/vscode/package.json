@@ -1,0 +1,46 @@
+{
+  "name": "captain-vscode",
+  "displayName": "Stixis Captain",
+  "description": "Shows whether this developer's AI traffic goes through Stixis Captain, and sets up governed endpoints.",
+  "version": "0.1.0",
+  "publisher": "stixis",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Other"],
+  "main": "./dist/extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      { "command": "captain.setKey", "title": "Captain: Set Key" },
+      { "command": "captain.clearKey", "title": "Captain: Clear Key" },
+      { "command": "captain.refresh", "title": "Captain: Refresh Status" },
+      { "command": "captain.showStatus", "title": "Captain: Show Status" },
+      { "command": "captain.openContinueConfig", "title": "Captain: Open Continue Configuration" }
+    ],
+    "configuration": {
+      "title": "Stixis Captain",
+      "properties": {
+        "captain.gatewayUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000",
+          "markdownDescription": "Base URL of the Captain API Gateway (no `/v1`). Use https except for a gateway on this machine."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc --noEmit && node esbuild.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "22.9.0",
+    "@types/vscode": "1.90.0",
+    "@vscode/vsce": "3.2.1",
+    "esbuild": "0.24.0",
+    "typescript": "5.6.3",
+    "vitest": "2.1.8"
+  }
+}
