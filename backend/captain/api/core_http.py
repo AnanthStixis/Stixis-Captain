@@ -55,6 +55,7 @@ from captain.core.models import (
     Settlement,
     UsageEvent,
 )
+from captain.envfile import current_env
 
 _STATUS = {
     AuthenticationError: 401,
@@ -304,5 +305,9 @@ def create_app_from_env() -> FastAPI:
     from captain.config import build_from_env
 
     built, settings = build_from_env()
-    engine = create_engine(settings.database_url, pool_size=10, pool_pre_ping=True)
+    engine = create_engine(
+        settings.database_url,
+        pool_size=int(current_env().get("CAPTAIN_DB_POOL_SIZE", "10")),
+        pool_pre_ping=True,
+    )
     return create_app(built.core, PgStateStore(engine))

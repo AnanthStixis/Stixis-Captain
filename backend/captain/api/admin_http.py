@@ -12,6 +12,7 @@ import csv
 import io
 import json
 import logging
+import re
 import zipfile
 from collections import Counter, defaultdict
 from collections.abc import Callable
@@ -43,13 +44,17 @@ from captain.api.admin_sso import LOGIN_TTL_S, CsrfError, LoginCookie, SsoError,
 from captain.api.controlplane import CompanyStore, install_controlplane_routes
 from captain.api.limits import BodyLimitMiddleware
 from captain.api.org import InMemoryOrganizationStore, InviteService, OrganizationStore
+from captain.api.signin_mail import SignInMailer
+from captain.api.sso_live import LiveSso
+from captain.api.state import InMemoryStateStore
 from captain.core.admin import AdminActor, AdminService
 from captain.core.budget.model import BudgetDefinition, Period, RateLimitDefinition
-from captain.core.context.service import ControlDowngradeError
+from captain.core.context.service import Application, ControlDowngradeError, Project
 from captain.core.decision_api import AuthenticationError, CoreError
 from captain.core.engine import admin_event
 from captain.core.factory import BuiltCore
 from captain.core.identity.killswitch import KillScope
+from captain.core.identity.model import PrincipalRecord
 from captain.core.identity.rbac import Permission, PermissionDenied, permissions_for, require
 from captain.core.models import (
     ActionType,
@@ -81,6 +86,7 @@ from captain.core.reporting.monthly import (
     to_xlsx,
 )
 from captain.core.secrets_store import SecretsService
+from captain.core.usage.pricing import ModelPrice
 from captain.core.usage.reports import chargeback, settled_costs, to_csv
 
 log = logging.getLogger("captain.admin")
@@ -109,6 +115,12 @@ ADMIN_EVENTS = {
     "approval.escalated",
     "alert.raised",
     "subject.erased",
+    "aikey.changed",
+    "company.changed",
+    "user.changed",
+    "org.changed",
+    "invite.created",
+    "invite.redeemed",
 }
 
 
@@ -117,13 +129,21 @@ class _Body(BaseModel):
 
 
 class IssueKeyBody(_Body):
-    principal_id: str
+    principal_id: str = Field(default="", max_length=128)
+    # A key for an app or service instead of a person: Captain creates it as "app:<name>".
+    app_name: str | None = Field(default=None, min_length=2, max_length=80)
     register_id: str
     project_id: str
     application_id: str
     environment: Environment
     ttl_days: int | None = Field(default=None, gt=0, le=365)
     label: str = Field(default="", max_length=200)
+
+
+class PriceBody(_Body):
+    input_usd_per_m: float = Field(ge=0, le=10_000)
+    output_usd_per_m: float = Field(ge=0, le=10_000)
+    cached_input_usd_per_m: float | None = Field(default=None, ge=0, le=10_000)
 
 
 class ReasonBody(_Body):
@@ -206,59 +226,81 @@ def _period(days: int) -> tuple[datetime, datetime]:
 
 def _install_sso_routes(
     app: FastAPI,
-    sso: SsoService,
+    live: "LiveSso",
     session_of: Callable[[Request], tuple[AdminActor, str] | None],
+    invites: InviteService | None,
+    on_test: Callable[[AdminActor], None],
 ) -> None:
-    secure = sso.cfg.secure_cookies
+    """Sign-in routes. They always exist and follow whatever SSO is on right now (the org
+    admin can turn it on from the Setup page), plus the org admin's test sign-in."""
 
-    def fail(code: str) -> RedirectResponse:
-        r = RedirectResponse(f"/?sso_error={code}", status_code=303)
+    def fail(code: str, test: bool = False) -> RedirectResponse:
+        target = f"/setup?sso_test={code}" if test else f"/?sso_error={code}"
+        r = RedirectResponse(target, status_code=303)
         r.delete_cookie(LoginCookie.NAME, path="/admin/v1/auth")
         return r
 
     @app.get("/admin/v1/auth/login")
-    def login() -> Response:
+    def login(request: Request, test: int = 0) -> Response:
+        if test:
+            # Only a signed-in org admin may try new settings (it opens no session).
+            s, svc = session_of(request), live.draft()
+            if s is None or Permission.ORG_WRITE not in permissions_for(s[0].roles):
+                return fail("forbidden", True)
+            if svc is None:
+                return fail("no_settings", True)
+        else:
+            svc = live.get()
+            if svc is None:
+                return fail("not_configured")
         try:
-            url, sealed = sso.start()
+            url, sealed = svc.start(test=bool(test))
         except SsoError as e:
             log.warning("SSO login could not start: %s", e)
-            return fail(e.code)
+            return fail(e.code, bool(test))
+        except Exception as e:  # noqa: BLE001 - e.g. the provider address is wrong
+            log.warning("SSO login could not start: %s", e)
+            return fail("unreachable", bool(test))
         r = RedirectResponse(url, status_code=303)
-        r.set_cookie(
-            LoginCookie.NAME,
-            sealed,
-            max_age=LOGIN_TTL_S,
-            path="/admin/v1/auth",
-            httponly=True,
-            samesite="lax",
-            secure=secure,
-        )
+        r.set_cookie(LoginCookie.NAME, sealed, max_age=LOGIN_TTL_S, path="/admin/v1/auth",
+                     httponly=True, samesite="lax", secure=svc.cfg.secure_cookies)  # fmt: skip
         return r
 
     @app.get("/admin/v1/auth/callback")
     def callback(request: Request) -> Response:
+        sealed = request.cookies.get(LoginCookie.NAME)
+        test = False
+        probe = live.get() or live.draft()
+        if probe is not None and sealed:
+            try:
+                test = probe.login_cookie.open(sealed)[0].startswith("t.")
+            except SsoError:
+                pass
+        svc = live.draft() if test else live.get()
+        if svc is None:
+            return fail("not_configured", test)
         try:
-            a, sid, _ = sso.finish(
-                dict(request.query_params), request.cookies.get(LoginCookie.NAME)
-            )
+            a, sid, _ = svc.finish(dict(request.query_params), sealed, open_session=not test)
         except SsoError as e:
             log.warning("SSO sign-in refused (%s): %s", e.code, e)
-            return fail(e.code)
+            return fail(e.code, test)
         except AuthenticationError as e:  # ID token failed verification
             log.warning("SSO sign-in refused (token): %s", e)
-            return fail("failed")
+            return fail("failed", test)
+        if test:
+            # The test passes only if the person who tried it would be an org admin under
+            # SSO: otherwise turning SSO on could lock the company out of its own Captain.
+            if Permission.ORG_WRITE not in permissions_for(a.roles):
+                return fail("not_admin", True)
+            on_test(a)
+            r = RedirectResponse("/setup?sso_test=ok", status_code=303)
+            r.delete_cookie(LoginCookie.NAME, path="/admin/v1/auth")
+            return r
         log.info("SSO sign-in: %s roles=%s", a.id, sorted(a.roles))
         r = RedirectResponse("/", status_code=303)  # fixed target: no open redirect
         r.delete_cookie(LoginCookie.NAME, path="/admin/v1/auth")
-        r.set_cookie(
-            sso.cookie_name,
-            sid,
-            max_age=sso.cfg.session_lifetime_s,
-            path="/",
-            httponly=True,
-            samesite="lax",
-            secure=secure,
-        )
+        r.set_cookie(svc.cookie_name, sid, max_age=svc.cfg.session_lifetime_s, path="/",
+                     httponly=True, samesite="lax", secure=svc.cfg.secure_cookies)  # fmt: skip
         return r
 
     @app.get("/admin/v1/auth/session")
@@ -276,12 +318,19 @@ def _install_sso_routes(
 
     @app.post("/admin/v1/auth/logout")
     def logout(request: Request) -> Response:
-        s = session_of(request)
-        if s is not None:
-            sso.check_csrf(request.method, request.headers, s[1])
-            sso.sessions.delete(request.cookies[sso.cookie_name])
         r = JSONResponse({"status": "signed out"})
-        r.delete_cookie(sso.cookie_name, path="/", httponly=True, samesite="lax", secure=secure)
+        svc = live.get()
+        if svc is not None and (sid := request.cookies.get(svc.cookie_name)):
+            if (s := svc.sessions.get(sid)) is not None:
+                svc.check_csrf(request.method, request.headers, s[1])
+                svc.sessions.delete(sid)
+            r.delete_cookie(svc.cookie_name, path="/", httponly=True, samesite="lax",
+                            secure=svc.cfg.secure_cookies)  # fmt: skip
+        if invites is not None and (sid := request.cookies.get(invites.cookie_name)):
+            if (s := invites.session(sid)) is not None:
+                invites.check_csrf(request.method, request.headers, s[1])
+                invites.end(sid)
+            r.delete_cookie(invites.cookie_name, path="/", httponly=True, samesite="strict")
         return r
 
 
@@ -306,9 +355,16 @@ def create_admin_app(
     dev_token_enabled: bool = False,
     org_store: OrganizationStore | None = None,
     invites: InviteService | None = None,
+    signin_mailer: "SignInMailer | None" = None,
+    console_url: str | None = None,
     ai_keys: SecretsService | None = None,
     companies: CompanyStore | None = None,
+    live_sso: "LiveSso | None" = None,
+    company_http: Any = None,
+    provision: Any = None,
 ) -> FastAPI:
+    # The SSO in force can change while running (the org admin turns it on in Setup).
+    live = live_sso or LiveSso(InMemoryStateStore(ttl_s=12 * 3600), None, fixed=sso)
     app = FastAPI(title="Captain Admin API", version="1", docs_url=None, redoc_url=None)
     app.add_middleware(BodyLimitMiddleware, max_bytes=1_000_000)  # admin bodies are small
 
@@ -370,6 +426,7 @@ def create_admin_app(
         return JSONResponse({"error": "INVALID", "message": str(e)}, status_code=400)
 
     def sso_session_of(request: Request) -> tuple[AdminActor, str] | None:
+        sso = live.get()
         if sso is None:
             return None
         sid = request.cookies.get(sso.cookie_name)
@@ -378,7 +435,14 @@ def create_admin_app(
     def invite_session_of(request: Request) -> tuple[AdminActor, str] | None:
         if invites is None:
             return None  # refused (None) as soon as SSO is configured
-        return invites.session(request.cookies.get(invites.cookie_name))
+        s = invites.session(request.cookies.get(invites.cookie_name))
+        if s is None:
+            return None
+        # Live roles: deactivating someone or changing their roles takes effect at once.
+        p = built.infra.identity_store.get_principal(s[0].id)
+        if p is None or not p.active or not p.roles:
+            return None
+        return AdminActor(s[0].id, p.roles), s[1]
 
     def session_of(request: Request) -> tuple[AdminActor, str] | None:
         return sso_session_of(request) or invite_session_of(request)
@@ -389,7 +453,7 @@ def create_admin_app(
         if authorization and authorization.startswith("Bearer "):
             host = request.client.host if request.client else None
             return auth.authenticate(authorization[7:].strip(), host)
-        if sso is not None and (s := sso_session_of(request)) is not None:
+        if (sso := live.get()) is not None and (s := sso_session_of(request)) is not None:
             a, csrf = s
             sso.check_csrf(request.method, request.headers, csrf)  # cookie => CSRF defence
             return a
@@ -402,10 +466,24 @@ def create_admin_app(
     # ------------------------------------------------------------------ auth
     @app.get("/admin/v1/auth/config")
     def auth_config() -> dict[str, bool]:
-        return {"sso": sso is not None, "dev_token": dev_token_enabled}
+        # stixis_console: this is Stixis's control plane, not a company's own Captain; the
+        # console then shows only Companies, Stixis staff and Audit.
+        return {
+            "sso": live.get() is not None,
+            "dev_token": dev_token_enabled,
+            "stixis_console": companies is not None,
+            # Companies without SSO: people get a one-time sign-in link by email.
+            "email_link": live.get() is None
+            and invites is not None
+            and signin_mailer is not None
+            and bool(console_url),
+        }
 
-    if sso is not None:
-        _install_sso_routes(app, sso, session_of)
+    def sso_tested(a: AdminActor) -> None:
+        live.mark_tested(a.id)
+        built.core.record(admin_event(EventType.ORG_CHANGED, a.id, {"fields": "sso tested"}))
+
+    _install_sso_routes(app, live, session_of, invites, sso_tested)
 
     Actor = Annotated[AdminActor, Depends(actor)]
 
@@ -415,10 +493,12 @@ def create_admin_app(
 
     # One company-profile store, shared by the org pages and the platform bootstrap.
     org_store = org_store or InMemoryOrganizationStore()
-    install_org_routes(app, built, admin, queries, actor, org_store, invites, sso, session_of)
+    install_org_routes(app, built, admin, queries, actor, org_store, invites, live, session_of,
+                       signin_mailer, console_url)  # fmt: skip
     install_platform_routes(app, built, queries, org_store, invites)
     if companies is not None:  # Stixis's own install only (CAPTAIN_CONTROL_PLANE=1)
-        install_controlplane_routes(app, built, actor, companies, ai_keys)
+        install_controlplane_routes(app, built, actor, companies, ai_keys, http=company_http,
+                                    queries=queries, provision=provision)  # fmt: skip
     install_aikey_routes(app, built, admin, queries, actor, ai_keys)
     install_adopter_routes(app, queries, actor)
 
@@ -875,14 +955,65 @@ def create_admin_app(
         can(a, Permission.KEYS_READ)
         return [_iso(key_view(k)) for k in queries.keys(principal_id)]
 
+    def ensure_key_context(a: AdminActor, pid: str, body: IssueKeyBody) -> tuple[str, str]:
+        """A key belongs to a project and an application tied to its AI use. The console
+        asks only for a team/project name and a tool, so create what is missing; an
+        existing application tied to another project or AI use gets a separate one."""
+        require(a.roles, Permission.KEYS_WRITE)
+        ctx = built.infra.context_store
+        owner = built.infra.identity_store.get_principal(pid)
+        org = owner.org_id if owner else "default"
+        proj = body.project_id.strip() or "general"
+        p = ctx.project(proj)
+        if p is None:
+            ctx.put_project(Project(proj, org, proj))
+        elif p.org_id != org or not p.active:
+            proj = f"{proj}.{org}"[:128]
+            if ctx.project(proj) is None:
+                ctx.put_project(Project(proj, org, body.project_id.strip() or "general"))
+        app_id = body.application_id.strip() or "other"
+        existing = ctx.application(app_id)
+        if (
+            existing is None
+            or existing.project_id != proj
+            or existing.register_id != (body.register_id)
+        ):
+            if existing is not None:
+                app_id = f"{app_id}.{proj}.{body.register_id}".lower()[:128]
+            found = ctx.application(app_id)
+            if found is None:
+                ctx.put_application(
+                    Application(app_id, proj, body.register_id, body.application_id.strip())
+                )
+            elif not found.active:
+                raise HTTPException(409, {"error": "INACTIVE", "message": "that tool is retired"})
+        return proj, app_id
+
     @app.post("/admin/v1/keys")
     def issue_key(a: Actor, body: IssueKeyBody) -> dict[str, Any]:
+        pid = body.principal_id.strip()
+        if body.app_name:
+            require(a.roles, Permission.KEYS_WRITE)
+            slug = re.sub(r"[^a-z0-9]+", "-", body.app_name.strip().lower()).strip("-")
+            if not slug:
+                raise HTTPException(400, {"error": "INVALID", "message": "enter an app name"})
+            pid = f"app:{slug}"
+            ids = built.infra.identity_store
+            if ids.get_principal(pid) is None:
+                org = next((x.org_id for x in queries.principals()), "default")
+                ids.put_principal(PrincipalRecord(
+                    id=pid, type=PrincipalType.APPLICATION.value, org_id=org,
+                    display_name=body.app_name.strip(),
+                ))  # fmt: skip
+        if not pid:
+            raise HTTPException(400, {"error": "INVALID", "message": "choose who the key is for"})
+        project_id, application_id = ensure_key_context(a, pid, body)
         issued = admin.issue_key(
             a,
-            body.principal_id,
+            pid,
             body.register_id,
-            body.project_id,
-            body.application_id,
+            project_id,
+            application_id,
             body.environment,
             timedelta(days=body.ttl_days) if body.ttl_days else None,
             body.label,
@@ -1113,6 +1244,94 @@ def create_admin_app(
         except (TypeError, KeyError) as e:
             raise ValueError(f"invalid {kind}: {e}") from e
         admin.upsert_registry(a, item)
+        return {"status": "saved"}
+
+    # ------------------------------------------------------------- readiness
+    @app.get("/admin/v1/readiness")
+    def readiness(a: Actor) -> dict[str, Any]:
+        """What a company must set up before its first AI call, in order. Each step is
+        checked against the live configuration (nothing stored), so it ticks itself."""
+        can(a, Permission.REGISTER_READ)
+        reg, cat = core.m.registry, core.m.prices
+        providers = [x for x in queries.registry("provider") if x.get("active", True)]
+        has_key = any(x.get("credential_ref") for x in providers)
+        uses = [e for e in queries.register_entries() if e.active]
+        allowed = sorted({m for e in uses for m in e.allowed_models})
+
+        def routable(m: str) -> bool:
+            try:
+                return reg is not None and bool(reg.resolve_route(m))
+            except Exception:  # noqa: BLE001 - an unknown or disabled model is "not ready"
+                return False
+
+        def priced(m: str) -> bool:
+            try:
+                return cat is not None and cat.price_at(m) is not None
+            except Exception:  # noqa: BLE001
+                return False
+
+        usable = [m for m in allowed if routable(m)]
+        unpriced = [m for m in usable if not priced(m)]
+        hard = [d for d in queries.budget_definitions() if d.hard]
+        now = datetime.now(UTC)
+        live_keys = [k for k in queries.keys(None) if k.status.value == "ACTIVE"
+                     and (k.expires_at is None or k.expires_at > now)]  # fmt: skip
+        steps = [
+            {"key": "ai_key", "label": "Add your AI provider key", "done": has_key,
+             "detail": "Your OpenAI, Anthropic or Azure key, stored encrypted."},
+            {"key": "ai_use", "label": "Describe an approved AI use", "done": bool(uses),
+             "detail": "For example: Coding assistant. Its rules apply to every key under it."},
+            {"key": "model", "label": "Add a model and allow it", "done": bool(usable),
+             "detail": "A model from your provider, allowed for your AI use."},
+            {"key": "price", "label": "Set the model's price",
+             "done": bool(usable) and not unpriced, "missing": unpriced,
+             "detail": "Needed to count spending. Missing: " + ", ".join(unpriced)
+             if unpriced else "Needed to count spending."},
+            {"key": "budget", "label": "Set a spending limit", "done": bool(hard),
+             "detail": "Every AI call needs a limit, e.g. US$100 a month for the company."},
+            {"key": "captain_key", "label": "Create a Captain key", "done": bool(live_keys),
+             "detail": "Given to a person or app to use AI through Captain."},
+        ]  # fmt: skip
+        return {"steps": steps, "ready_for_keys": all(x["done"] for x in steps[:5])}
+
+    # ---------------------------------------------------------------- prices
+    # Dollars per million tokens, as on the provider's pricing page. Prices drive budgets
+    # and cost figures (not what the provider bills). A change is a new version.
+    @app.get("/admin/v1/prices")
+    def prices(a: Actor) -> list[dict[str, Any]]:
+        can(a, Permission.REGISTER_READ)
+        cat = core.m.prices
+        return [
+            {"model": x.model, "input_usd_per_m": x.input_per_m / 1e6,
+             "output_usd_per_m": x.output_per_m / 1e6,
+             "cached_input_usd_per_m": None if x.cached_input_per_m is None
+             else x.cached_input_per_m / 1e6,
+             "since": x.effective_from.isoformat(), "version": x.version}
+            for x in (cat.latest() if cat else [])
+        ]  # fmt: skip
+
+    @app.put("/admin/v1/prices/{alias}")
+    def set_price(a: Actor, alias: str, body: PriceBody) -> dict[str, str]:
+        can(a, Permission.REGISTER_WRITE)
+        cat, reg = core.m.prices, core.m.registry
+        model = reg.usable_model(alias) if reg else None
+        if cat is None or model is None:
+            raise HTTPException(404, {"error": "NOT_FOUND", "message": "no such enabled model"})
+        now = datetime.now(UTC)
+
+        def micro(v: float | None) -> int | None:
+            return None if v is None else round(v * 1_000_000)
+
+        price = ModelPrice(
+            alias, model.provider_id, "console-" + now.strftime("%Y%m%d%H%M%S%f"),
+            now - timedelta(seconds=1), micro(body.input_usd_per_m) or 0,
+            micro(body.output_usd_per_m) or 0,
+            cached_input_per_m=micro(body.cached_input_usd_per_m),
+        )  # fmt: skip
+        core.record(admin_event(EventType.REGISTRY_CHANGED, a.id, {
+            "kind": "price", "key": alias, "input_usd_per_m": body.input_usd_per_m,
+            "output_usd_per_m": body.output_usd_per_m}))  # fmt: skip
+        cat.publish(price)
         return {"status": "saved"}
 
     # ------------------------------------------------------- audit & reports

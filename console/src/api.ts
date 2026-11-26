@@ -128,6 +128,8 @@ export interface SessionInfo extends Me {
 export interface AuthConfig {
   sso: boolean;
   dev_token: boolean;
+  stixis_console?: boolean;
+  email_link?: boolean;
 }
 
 export interface Overview {
@@ -379,6 +381,7 @@ export interface UserView {
   email: string;
   name: string;
   team: string | null;
+  job_title?: string | null;
   roles: string[];
   active: boolean;
   keys_revoked?: number;
@@ -391,6 +394,7 @@ export interface Contact {
 }
 
 export interface Organization {
+  org_id?: string;
   company_name: string;
   legal_name: string;
   domains: string[];

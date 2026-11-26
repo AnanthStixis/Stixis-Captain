@@ -30,15 +30,16 @@ from typing import Annotated, Any, Literal, Protocol
 import httpx
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from captain.api.org import Contact
+from captain.api.org import Contact, Organization
 from captain.core.admin import AdminActor
 from captain.core.engine import admin_event
 from captain.core.factory import BuiltCore
 from captain.core.identity.rbac import Permission, require
 from captain.core.models import EventType
 from captain.core.secrets_store import SecretsService
+from captain.envfile import current_env
 
 CODE = r"^[a-z][a-z0-9]{1,11}$"  # also the OpenTofu `client` code
 
@@ -51,6 +52,12 @@ class CompanyDetails(BaseModel):
     country: str = Field(default="", max_length=64)
     industry: str = Field(default="", max_length=120)
     contacts: list[Contact] = Field(default_factory=list, max_length=20)
+
+    @field_validator("domains")
+    @classmethod
+    def _domains(cls, v: list[str]) -> list[str]:
+        # The same rule the company's install applies at bootstrap: catch it here, at entry.
+        return Organization.model_validate({"domains": v}).domains
 
 
 class NewCompany(BaseModel):
@@ -103,6 +110,13 @@ def _check_url(url: str) -> str:
     u = url.strip().rstrip("/")
     if re.match(r"^https://[^\s/]+", u) or re.match(r"^http://(127\.0\.0\.1|localhost)(:\d+)?$", u):
         return u
+    # QA / test only: hosts listed in CAPTAIN_INSECURE_INSTALL_HOSTS may use plain http
+    # (e.g. the client install's container name on a private Docker network).
+    allowed = {h.strip().lower() for h in current_env().get("CAPTAIN_INSECURE_INSTALL_HOSTS", "")
+               .split(",") if h.strip()}  # fmt: skip
+    m = re.match(r"^http://([a-z0-9.-]+)(:\d+)?$", u.lower())
+    if m and m.group(1) in allowed:
+        return u
     raise HTTPException(400, {"error": "BAD_URL", "message": "the address must be https://"})
 
 
@@ -112,7 +126,9 @@ def _fail(error: str, message: str) -> None:
 
 def company_view(doc: dict[str, Any]) -> dict[str, Any]:
     """Never the token, never its secret id."""
-    return {k: v for k, v in doc.items() if k != "token_secret_id"}
+    return {k: v for k, v in doc.items() if k != "token_secret_id"} | {
+        "shared": "provisioned" in doc
+    }
 
 
 def install_files(doc: dict[str, Any], token: str) -> bytes:
@@ -169,8 +185,26 @@ def install_controlplane_routes(
     store: CompanyStore,
     secrets: SecretsService | None,
     http: httpx.Client | None = None,
+    queries: Any = None,  # AdminQueries: recent company changes on the dashboard
+    provision: Callable[[str], str] | None = None,
 ) -> None:
+    """`provision` is set on a shared Captain (ADR-008): adding a company creates its own
+    schema and address at once; no install files, no separate deployment."""
     Actor = Annotated[AdminActor, Depends(actor_dep)]
+
+    def do_provision(a: AdminActor, doc: dict[str, Any]) -> None:
+        assert provision is not None
+        try:
+            doc["admin_url"] = provision(doc["code"])
+        except Exception as e:  # noqa: BLE001 - shown to the platform admin, retryable
+            doc["last_error"] = f"Could not create the company's storage: {e}"
+            store.put(doc)
+            raise HTTPException(502, {"error": "PROVISION_FAILED",
+                                      "message": doc["last_error"]}) from e  # fmt: skip
+        doc["provisioned"], doc["last_error"] = True, None
+        store.put(doc)
+        record(a, doc["code"], "provisioned")
+
     client = http or httpx.Client(timeout=20)
 
     def need_secrets() -> SecretsService:
@@ -211,8 +245,76 @@ def install_controlplane_routes(
                 "(not set there, or a different one).",
             )
         if r.status_code >= 400:
-            _fail("INSTALL_ERROR", f"The install answered {r.status_code}.")
+            try:
+                why = r.json().get("detail")
+            except ValueError:
+                why = None
+            if isinstance(why, list) and why and isinstance(why[0], dict):  # validation error
+                why = why[0].get("msg")
+            elif isinstance(why, dict):
+                why = why.get("message")
+            _fail(
+                "INSTALL_ERROR",
+                f"The install answered {r.status_code}" + (f": {why}" if why else "."),
+            )
         return r.json()
+
+    @app.get("/admin/v1/companies/dashboard")
+    def dashboard(a: Actor) -> dict[str, Any]:
+        """The Stixis dashboard: built from the company list and each company's last health
+        summary (counts only). No company's evidence is read."""
+        require(a.roles, Permission.COMPANIES_WRITE)
+        docs = store.all()
+        status = {k: 0 for k in ("onboarding", "active", "suspended")}
+        health = {k: 0 for k in ("healthy", "problem", "not_installed", "not_checked")}
+        pipeline = {"added": 0, "address_set": 0, "bootstrapped": 0, "healthy": 0}
+        totals = {"users": 0, "org_admins": 0, "active_keys": 0, "calls_last_7_days": 0}
+        attention: list[dict[str, Any]] = []
+        usage: list[dict[str, Any]] = []
+        for d in docs:
+            name = d["details"]["company_name"]
+            status[d["status"]] = status.get(d["status"], 0) + 1
+            s = d.get("last_summary")
+            pipeline["added"] += 1
+            if d.get("admin_url"):
+                pipeline["address_set"] += 1
+            if d.get("bootstrapped_at"):
+                pipeline["bootstrapped"] += 1
+            if not d.get("admin_url"):
+                health["not_installed"] += 1
+                if d["status"] != "suspended":
+                    attention.append({"code": d["code"], "name": name,
+                                      "reason": "Install not connected yet"})  # fmt: skip
+            elif d.get("last_error"):
+                health["problem"] += 1
+                attention.append({"code": d["code"], "name": name, "reason": d["last_error"]})
+            elif s:
+                health["healthy"] += 1
+                pipeline["healthy"] += 1
+                for k in totals:
+                    totals[k] += int(s.get(k) or 0)
+                calls = int(s.get("calls_last_7_days") or 0)
+                usage.append({"code": d["code"], "name": name, "calls_last_7_days": calls})
+                if not d.get("bootstrapped_at") and not s.get("org_admins"):
+                    attention.append({"code": d["code"], "name": name,
+                                      "reason": "No org admin yet: press Bootstrap"})  # fmt: skip
+            else:
+                health["not_checked"] += 1
+                attention.append({"code": d["code"], "name": name,
+                                  "reason": "Not checked yet: press Check now"})  # fmt: skip
+        recent: list[dict[str, Any]] = []
+        if queries is not None:
+            _, rows = queries.events_page(None, None, {"company.changed"}, None, None, None, 8, 0)
+            from captain.api.admin_queries import event_view
+
+            recent = [{"when": e.recorded_at.isoformat(), "headline": v["headline"]}
+                      for e in rows for v in [event_view(e)]]  # fmt: skip
+        return {
+            "companies": len(docs), "status": status, "health": health, "pipeline": pipeline,
+            "totals": totals, "needs_attention": attention[:10],
+            "top_usage": sorted(usage, key=lambda u: -u["calls_last_7_days"])[:5],
+            "recent_changes": recent,
+        }  # fmt: skip
 
     @app.get("/admin/v1/companies")
     def list_companies(a: Actor) -> list[dict[str, Any]]:
@@ -228,7 +330,7 @@ def install_controlplane_routes(
         token = pysecrets.token_urlsafe(32)
         stored = svc.put(f"platform-{body.code}", token, a.id)
         now = datetime.now(UTC).isoformat()
-        doc = {
+        doc: dict[str, Any] = {
             "code": body.code, "details": body.details.model_dump(), "status": "onboarding",
             "region": body.region, "environment": body.environment,
             "org_admin_email": body.org_admin_email.strip().lower(),
@@ -237,8 +339,22 @@ def install_controlplane_routes(
             "bootstrapped_at": None, "last_summary": None, "last_checked": None,
             "last_error": None,
         }  # fmt: skip
+        if provision is not None:
+            doc["provisioned"] = False  # shared Captain: storage is created next
         record(a, body.code, "added")
         store.put(doc)
+        if provision is not None:
+            do_provision(a, doc)
+        return company_view(doc)
+
+    @app.post("/admin/v1/companies/{code}/provision")
+    def reprovision(a: Actor, code: str) -> dict[str, Any]:
+        """Shared Captain: create (or finish creating) the company's storage."""
+        require(a.roles, Permission.COMPANIES_WRITE)
+        if provision is None:
+            raise HTTPException(404, {"error": "NOT_SHARED"})
+        doc = load(code)
+        do_provision(a, doc)
         return company_view(doc)
 
     @app.get("/admin/v1/companies/{code}")

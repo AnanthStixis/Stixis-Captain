@@ -1,0 +1,17 @@
+**/.git
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+backend/.dev
+backend/.env
+**/*.env
+console/dist
+tools
+Ref_Doc
+desktop
+browser/extension/dist
+ide/vscode/dist
+ide/vscode/*.vsix

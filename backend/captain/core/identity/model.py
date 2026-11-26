@@ -64,3 +64,4 @@ class PrincipalRecord:
     idp_subject: str | None = None
     roles: frozenset[str] = field(default_factory=frozenset)
     active: bool = True
+    job_title: str | None = None  # e.g. Developer, Manager, HR: for people, not access

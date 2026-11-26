@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import math
 import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -40,9 +42,44 @@ def _ceil_div(a: int, b: int) -> int:
 
 
 class PriceCatalog:
-    def __init__(self) -> None:
+    """`persist` stores a new price (Postgres); `reload` re-reads all prices, used when a
+    model has no price here yet, so a price set on the console reaches every gateway
+    without a restart (at most once per `reload_every_s`)."""
+
+    def __init__(
+        self,
+        persist: Callable[[ModelPrice], None] | None = None,
+        reload: Callable[[], list[ModelPrice]] | None = None,
+        reload_every_s: float = 5.0,
+    ) -> None:
         self._rows: dict[str, list[ModelPrice]] = {}
         self._lock = threading.Lock()
+        self._persist, self._reload = persist, reload
+        self._reload_every, self._last_reload = reload_every_s, 0.0
+
+    def publish(self, price: ModelPrice) -> None:
+        """A new price version from the console: stored, then in force here at once."""
+        if self._persist is not None:
+            self._persist(price)
+        self.add(price)
+
+    def latest(self) -> list[ModelPrice]:
+        with self._lock:
+            return [rows[-1] for rows in self._rows.values() if rows]
+
+    def _refresh(self) -> bool:
+        now = time.monotonic()
+        if self._reload is None or now - self._last_reload < self._reload_every:
+            return False
+        self._last_reload = now
+        fresh = self._reload()
+        with self._lock:
+            for p in fresh:
+                rows = self._rows.setdefault(p.model, [])
+                if not any(r.version == p.version for r in rows):
+                    rows.append(p)
+                    rows.sort(key=lambda r: r.effective_from)
+        return True
 
     def add(self, price: ModelPrice) -> None:
         with self._lock:
@@ -55,6 +92,8 @@ class PriceCatalog:
     def price_at(self, model: str, at: datetime | None = None) -> ModelPrice:
         at = at or datetime.now(UTC)
         rows = [r for r in self._rows.get(model, []) if r.effective_from <= at]
+        if not rows and self._refresh():
+            rows = [r for r in self._rows.get(model, []) if r.effective_from <= at]
         if not rows:
             raise PriceNotFoundError(f"no price for {model} at {at.isoformat()}")
         return rows[-1]

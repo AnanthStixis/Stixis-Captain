@@ -36,6 +36,7 @@ INVITE_SESSION_KIND = "invite_session"  # never shared with SSO sessions
 INVITE_TTL_S = 7 * 24 * 3600
 INVITE_SESSION_S = 8 * 3600
 INVITE_COOKIE = "captain_invite_session"
+SIGNIN_LINK_TTL_S = 15 * 60  # emailed sign-in links: short, single use
 
 CHECKLIST_ITEMS: tuple[tuple[str, str], ...] = (
     ("sso", "Connect your sign-in (SSO)"),
@@ -229,8 +230,27 @@ class InviteService:
         )
         return token, exp
 
-    def redeem(self, token: str) -> tuple[AdminActor, str, str]:
+    def create_signin_link(self, email: str) -> str:
+        """An emailed sign-in link for an existing user (companies without SSO). The raw
+        token goes only into the email; only its hash is stored."""
+        if self._sso():
+            raise InviteError("sso_on", "SSO is configured; sign in with SSO instead")
+        token = secrets.token_urlsafe(32)
+        self._store.put(
+            INVITE_KIND,
+            _hash(token),
+            "invite",
+            {"email": normalise_email(email), "by": "email-link", "purpose": "signin",
+             "exp": self._now() + SIGNIN_LINK_TTL_S},
+        )  # fmt: skip
+        return token
+
+    def redeem(
+        self, token: str, roles_for: Callable[[str], frozenset[str]] | None = None
+    ) -> tuple[AdminActor, str, str]:
         """Single use: the record is deleted atomically; only the caller that deleted it wins.
+        An invite signs in as org-admin; an emailed sign-in link with the roles `roles_for`
+        returns for that user at this moment (none = refused).
         Returns (actor, session id, csrf token)."""
         if self._sso():
             raise InviteError("sso_on", "SSO is configured; sign in with SSO instead")
@@ -242,13 +262,24 @@ class InviteService:
             raise InviteError("invalid", "this invite link is not valid or was already used")
         if float(doc["exp"]) <= self._now():
             raise InviteError("invalid", "this invite link has expired")
-        actor = AdminActor(str(doc["email"]), frozenset({"org-admin"}))
+        if doc.get("purpose") == "signin":
+            roles = roles_for(str(doc["email"])) if roles_for else frozenset()
+            if not roles:
+                raise InviteError("invalid", "this sign-in link is not valid")
+        else:
+            roles = frozenset({"org-admin"})
+        actor = AdminActor(str(doc["email"]), roles)
         sid, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         self._store.put(
             INVITE_SESSION_KIND,
             _hash(sid),
             "session",
-            {"id": actor.id, "csrf": csrf, "exp": self._now() + INVITE_SESSION_S},
+            {
+                "id": actor.id,
+                "csrf": csrf,
+                "roles": sorted(roles),
+                "exp": self._now() + INVITE_SESSION_S,
+            },  # fmt: skip
         )
         return actor, sid, csrf
 
@@ -258,7 +289,8 @@ class InviteService:
         d = self._store.get(INVITE_SESSION_KIND, _hash(session_id), "session")
         if d is None or float(d["exp"]) <= self._now():
             return None
-        return AdminActor(str(d["id"]), frozenset({"org-admin"})), str(d["csrf"])
+        roles = frozenset(d.get("roles") or ["org-admin"])
+        return AdminActor(str(d["id"]), roles), str(d["csrf"])
 
     def end(self, session_id: str) -> None:
         self._store.delete(INVITE_SESSION_KIND, _hash(session_id))

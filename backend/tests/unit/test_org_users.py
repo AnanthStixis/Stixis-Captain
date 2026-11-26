@@ -140,6 +140,7 @@ def test_add_list_and_update_users(env: Env) -> None:
         "email": "priya@corp.example",
         "name": "Priya",
         "team": "data",
+        "job_title": None,
         "roles": ["finops"],
         "active": True,
     }
@@ -327,3 +328,15 @@ def test_invite_session_ids_are_not_sso_sessions() -> None:
 
     assert SessionManager(store, 3600).get(sid) is None
     assert svc.session(sid) is not None
+
+
+def test_job_title_is_kept_and_changes_nothing_about_access(env: Env) -> None:
+    new = {"email": "t@corp.example", "name": "Tara", "job_title": " Trainee "}
+    r = env.c.post("/admin/v1/users", json=new, headers=H())
+    assert r.json()["job_title"] == "Trainee" and r.json()["roles"] == []
+    upd = env.c.put("/admin/v1/users/t@corp.example", json={"team": "web"}, headers=H())
+    assert upd.json()["job_title"] == "Trainee"  # untouched when not sent
+    upd = env.c.put("/admin/v1/users/t@corp.example", json={"job_title": "Developer"}, headers=H())
+    assert upd.json()["job_title"] == "Developer"
+    p = env.h.built.infra.identity_store.get_principal("t@corp.example")
+    assert p is not None and p.job_title == "Developer" and p.roles == frozenset()

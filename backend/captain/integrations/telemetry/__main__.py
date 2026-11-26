@@ -17,14 +17,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from captain.config import build_from_env
-from captain.envfile import DEFAULT_ENV_FILE, dotenv_values
+from captain.envfile import current_env
 from captain.integrations.telemetry.base import (
     ActorMap,
     ImportFailure,
@@ -57,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--captain-host", action="append", default=[])
     a = ap.parse_args(argv)
 
-    env = {**dotenv_values(DEFAULT_ENV_FILE), **os.environ}
+    env = current_env()
     end = a.day or (datetime.now(UTC).date() - timedelta(days=1))
     actors = ActorMap(json.loads(a.actor_map.read_text()) if a.actor_map else None)
     built, _ = build_from_env()

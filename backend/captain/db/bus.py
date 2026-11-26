@@ -9,6 +9,7 @@ remains the backstop if a listener was disconnected when an event fired.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from collections import defaultdict
 
@@ -26,9 +27,16 @@ def plain_dsn(sqlalchemy_url: str) -> str:
     return sqlalchemy_url.replace("postgresql+psycopg://", "postgresql://", 1)
 
 
+def channel_for(sqlalchemy_url: str) -> str:
+    """captain_events, or captain_events_<schema> for a company in its own schema."""
+    m = re.search(r"search_path(?:=|%3D)([A-Za-z0-9_]+)", sqlalchemy_url)
+    return f"{_CHANNEL}_{m.group(1).lower()}" if m else _CHANNEL
+
+
 class PostgresBus:
     def __init__(self, dsn: str) -> None:
         self._dsn = plain_dsn(dsn)
+        self._channel = channel_for(dsn)
         self._subs: dict[Topic, list[Handler]] = defaultdict(list)
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -42,7 +50,7 @@ class PostgresBus:
         if _SEP in payload or len(payload) > 7000:  # NOTIFY payload limit is 8000 bytes
             raise ValueError("invalid bus payload")
         with psycopg.connect(self._dsn, autocommit=True) as c:
-            c.execute("SELECT pg_notify(%s, %s)", (_CHANNEL, f"{topic.value}{_SEP}{payload}"))
+            c.execute("SELECT pg_notify(%s, %s)", (self._channel, f"{topic.value}{_SEP}{payload}"))
 
     def subscribe(self, topic: Topic, handler: Handler) -> None:
         with self._lock:
@@ -54,7 +62,7 @@ class PostgresBus:
 
     def _listen(self) -> None:
         with psycopg.connect(self._dsn, autocommit=True) as conn:
-            conn.execute(f"LISTEN {_CHANNEL}")
+            conn.execute(f"LISTEN {self._channel}")
             self._ready.set()
             while not self._stop.is_set():
                 for n in conn.notifies(timeout=0.5, stop_after=50):

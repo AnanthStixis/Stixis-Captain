@@ -118,6 +118,8 @@ def is_control_downgrade(old: RegisterEntry, new: RegisterEntry) -> bool:
 class ContextStore(Protocol):
     def project(self, project_id: str) -> Project | None: ...
     def application(self, application_id: str) -> Application | None: ...
+    def put_project(self, p: Project) -> None: ...
+    def put_application(self, a: Application) -> None: ...
 
 
 class InMemoryContextStore:
@@ -130,6 +132,12 @@ class InMemoryContextStore:
 
     def application(self, application_id: str) -> Application | None:
         return self.applications.get(application_id)
+
+    def put_project(self, p: Project) -> None:
+        self.projects[p.id] = p
+
+    def put_application(self, a: Application) -> None:
+        self.applications[a.id] = a
 
 
 class ContextService:

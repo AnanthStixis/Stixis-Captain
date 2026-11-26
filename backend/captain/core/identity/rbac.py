@@ -67,7 +67,15 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
     "viewer": frozenset({Permission.USAGE_READ, Permission.REGISTER_READ, Permission.BUDGET_READ}),
     "content_reviewer": frozenset({Permission.CONTENT_READ, Permission.USAGE_READ}),
     # Stixis staff on the Stixis install (CAPTAIN_CONTROL_PLANE=1): the client company list.
-    "platform-admin": frozenset({Permission.COMPANIES_WRITE, Permission.REGISTER_READ}),
+    # Companies, Stixis staff (users) and the audit trail of those changes; nothing else.
+    "platform-admin": frozenset(
+        {
+            Permission.COMPANIES_WRITE,
+            Permission.USERS_WRITE,
+            Permission.KEYS_READ,
+            Permission.AUDIT_READ,
+        }
+    ),  # fmt: skip
 }
 
 

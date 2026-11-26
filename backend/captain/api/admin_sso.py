@@ -281,10 +281,11 @@ class SsoService:
         prefix = "__Host-" if cfg.secure_cookies else ""
         self.cookie_name = f"{prefix}captain_session"
 
-    def start(self) -> tuple[str, str]:
-        """Returns (authorization URL, sealed login cookie value)."""
+    def start(self, test: bool = False) -> tuple[str, str]:
+        """Returns (authorization URL, sealed login cookie value). A test sign-in (org admin
+        trying new settings) carries a marked state and opens no session."""
         state, nonce, verifier = (
-            secrets.token_urlsafe(24),
+            ("t." if test else "") + secrets.token_urlsafe(24),
             secrets.token_urlsafe(24),
             secrets.token_urlsafe(48),
         )
@@ -292,7 +293,9 @@ class SsoService:
             state, nonce, verifier
         )
 
-    def finish(self, query: dict[str, str], sealed: str | None) -> tuple[AdminActor, str, str]:
+    def finish(
+        self, query: dict[str, str], sealed: str | None, open_session: bool = True
+    ) -> tuple[AdminActor, str, str]:
         """Returns (actor, session id, csrf token) or raises SsoError."""
         if query.get("error"):
             raise SsoError("denied", f"identity provider returned: {query['error'][:60]}")
@@ -311,6 +314,8 @@ class SsoService:
             raise SsoError("groups_overage", str(e)) from e
         except NoRoleError as e:
             raise SsoError("no_role", str(e)) from e
+        if not open_session:
+            return actor, "", ""
         sid, csrf = self.sessions.create(actor)
         return actor, sid, csrf
 

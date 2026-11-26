@@ -38,7 +38,6 @@ variables by the client's secret store; they are never in code or config files.
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -80,7 +79,7 @@ from captain.db.stores import (
     PgWorkloadBindings,
     load_price_catalog,
 )
-from captain.envfile import DEFAULT_ENV_FILE, dotenv_values
+from captain.envfile import current_env
 
 
 class ConfigError(ValueError):
@@ -127,7 +126,7 @@ def _csv(v: str | None) -> tuple[str, ...]:
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if env is None:
-        env = {**dotenv_values(DEFAULT_ENV_FILE), **os.environ}  # real env wins over .env
+        env = current_env()  # real env wins over .env
 
     def need(k: str) -> str:
         v = env.get(k)
@@ -269,7 +268,8 @@ def build_worm(spec: str, retention_days: int) -> WormStore:
 
 
 def build_from_settings(s: Settings) -> BuiltCore:
-    engine = create_engine(s.database_url, pool_size=20, max_overflow=20, pool_pre_ping=True)
+    pool = int(current_env().get("CAPTAIN_DB_POOL_SIZE", "20"))
+    engine = create_engine(s.database_url, pool_size=pool, max_overflow=pool, pool_pre_ping=True)
     signer: Signer
     if s.ledger_key_spec.startswith("azurekv:"):
         signer, public = AzureKeyVaultSigner.from_key_url(s.ledger_key_spec[len("azurekv:") :])
@@ -347,7 +347,7 @@ def build_from_env() -> tuple[BuiltCore, Settings]:
 
 
 def escalation_approvers_from_env() -> Callable[[ApprovalTicket], tuple[str, ...]]:
-    env = {**dotenv_values(DEFAULT_ENV_FILE), **os.environ}
+    env = current_env()
     backup = _csv(env.get("CAPTAIN_ESCALATION_APPROVERS"))
 
     def resolve(_: ApprovalTicket) -> tuple[str, ...]:

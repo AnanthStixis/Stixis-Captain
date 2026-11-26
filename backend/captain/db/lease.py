@@ -13,6 +13,16 @@ import psycopg
 from captain.db.bus import plain_dsn
 
 
+def lease_name(database_url: str) -> str:
+    """One writer per install. Advisory locks are per database, so installs that share a
+    database through separate schemas (search_path in the URL options) get separate locks."""
+    from sqlalchemy.engine import make_url
+
+    opts = make_url(database_url).query.get("options") or ""
+    opts = opts if isinstance(opts, str) else ",".join(opts)
+    return "captain-core-worker" + (f":{opts}" if opts else "")
+
+
 class PgAdvisoryLease:
     def __init__(self, dsn: str, name: str) -> None:
         self._dsn = plain_dsn(dsn)

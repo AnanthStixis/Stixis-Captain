@@ -120,6 +120,7 @@ class PgIdentityStore:
             idp_subject=r.idp_subject,
             roles=frozenset(r.roles or ()),
             active=r.active,
+            job_title=r.job_title,
         )
 
     def put_principal(self, record: PrincipalRecord) -> None:
@@ -132,6 +133,7 @@ class PgIdentityStore:
             "idp_subject": record.idp_subject,
             "roles": sorted(record.roles),
             "active": record.active,
+            "job_title": record.job_title,
         }
         stmt = pg_insert(s.principals).values(**row)
         stmt = stmt.on_conflict_do_update(
@@ -589,23 +591,28 @@ class PgApprovalStore:
 
 
 def load_price_catalog(engine: Engine) -> PriceCatalog:
-    cat = PriceCatalog()
-    with engine.connect() as c:
-        for r in c.execute(select(s.model_prices)):
-            cat.add(
-                ModelPrice(
-                    r.model,
-                    r.provider,
-                    r.version,
-                    r.effective_from,
-                    r.input_per_m,
-                    r.output_per_m,
-                    r.cached_input_per_m,
-                    r.cache_write_per_m,
-                    r.currency,
-                )
-            )
+    def read() -> list[ModelPrice]:
+        with engine.connect() as c:
+            return [_price_row(r) for r in c.execute(select(s.model_prices))]
+
+    cat = PriceCatalog(persist=lambda p: save_price(engine, p), reload=read)
+    for p in read():
+        cat.add(p)
     return cat
+
+
+def _price_row(r: Any) -> ModelPrice:
+    return ModelPrice(
+        r.model,
+        r.provider,
+        r.version,
+        r.effective_from,
+        r.input_per_m,
+        r.output_per_m,
+        r.cached_input_per_m,
+        r.cache_write_per_m,
+        r.currency,
+    )
 
 
 def save_price(engine: Engine, p: ModelPrice) -> None:

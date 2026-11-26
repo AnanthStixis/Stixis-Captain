@@ -587,3 +587,124 @@ def test_pilot_report_has_metrics_and_an_honest_acceptance_checklist(env: Any) -
     assert md.status_code == 200 and md.headers["content-type"].startswith("text/markdown")
     assert "## MVP acceptance (M1a)" in md.text and "CHECK ELSEWHERE" in md.text
     assert c.get("/admin/v1/reports/pilot").status_code == 401
+
+
+def test_a_key_for_an_app_creates_the_app_by_name(env: Any) -> None:
+    h, c = env
+    body = {"app_name": "Support Chatbot!", "register_id": "AI-svc", "project_id": "general",
+            "application_id": "api", "environment": "PRODUCTION"}  # fmt: skip
+    r = c.post("/admin/v1/keys", headers=H(), json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["key"]["principal_id"] == "app:support-chatbot"
+    app = h.built.infra.identity_store.get_principal("app:support-chatbot")
+    assert app is not None and app.type == "APPLICATION" and app.display_name == "Support Chatbot!"
+    again = c.post("/admin/v1/keys", headers=H(), json=body)  # the same app, a second key
+    assert again.json()["key"]["principal_id"] == "app:support-chatbot"
+    none = {k: v for k, v in body.items() if k != "app_name"}
+    assert c.post("/admin/v1/keys", headers=H(), json=none).status_code == 400
+
+
+def test_a_new_key_gets_its_project_and_tool_so_the_gateway_accepts_it(env: Any) -> None:
+    """Regression (live, 2026-11-26): keys from the console form named a team and a tool
+    that did not exist, and the gateway rejected them."""
+    h, c = env
+    body = {"app_name": "IDE", "register_id": "AI-svc", "project_id": "payments",
+            "application_id": "vscode", "environment": "DEVELOPMENT"}  # fmt: skip
+    k = c.post("/admin/v1/keys", headers=H(), json=body).json()["key"]
+    ctx = h.built.infra.context_store
+    app = ctx.application(k["application_id"])
+    assert ctx.project("payments") is not None and app is not None
+    assert app.project_id == "payments" and app.register_id == "AI-svc"
+    # The same tool for another team gets its own application, never a mismatched one.
+    other = c.post("/admin/v1/keys", headers=H(), json={**body, "project_id": "web"}).json()
+    app2 = ctx.application(other["key"]["application_id"])
+    assert app2 is not None and app2.project_id == "web"
+    key = h.built.infra.identity_store.get_key(k["key_id"])
+    principal = h.built.infra.identity_store.get_principal(k["principal_id"])
+    assert key is not None and principal is not None
+    from captain.core.context.service import ContextHints
+
+    resolved = h.built.core.m.context.resolve(key, principal, ContextHints())
+    assert resolved.application_id == k["application_id"]
+
+
+def test_a_price_set_on_the_console_is_used_at_once(env: Any) -> None:
+    """Regression (live, 2026-11-26): a model added on the console had no price, and every
+    call was refused with "no price ... budget cannot be reserved"."""
+    from captain.core.registry.service import (
+        InMemoryRegistryStore,
+        ModelEntry,
+        Provider,
+        ProviderKind,
+        RegistryService,
+    )
+    from captain.core.usage.pricing import PriceCatalog
+
+    h, c = env
+    h.built.core.m.registry = reg = RegistryService(InMemoryRegistryStore())
+    h.built.core.m.prices = PriceCatalog()
+    reg.upsert_provider(Provider("p1", ProviderKind.OPENAI, "external", "env:X"))
+    reg.upsert_model(ModelEntry("new-model", "p1", "new-model", "external"))
+    cat = h.built.core.m.prices
+    assert cat is not None
+    import pytest as _pytest
+
+    from captain.core.usage.pricing import PriceNotFoundError
+
+    with _pytest.raises(PriceNotFoundError):
+        cat.price_at("new-model")
+    r = c.put("/admin/v1/prices/new-model", headers=H(),
+              json={"input_usd_per_m": 0.15, "output_usd_per_m": 0.6})  # fmt: skip
+    assert r.status_code == 200, r.text
+    p = cat.price_at("new-model")
+    assert p.input_per_m == 150_000 and p.output_per_m == 600_000
+    listed = {x["model"]: x for x in c.get("/admin/v1/prices", headers=H()).json()}
+    assert listed["new-model"]["output_usd_per_m"] == 0.6
+    assert c.put("/admin/v1/prices/nope", headers=H(),
+                 json={"input_usd_per_m": 1, "output_usd_per_m": 1}).status_code == 404  # fmt: skip
+
+
+def test_a_gateway_picks_up_a_price_stored_elsewhere() -> None:
+    from datetime import UTC, datetime
+
+    from captain.core.usage.pricing import ModelPrice, PriceCatalog
+
+    stored: list[ModelPrice] = []
+    admin = PriceCatalog(persist=stored.append)
+    gateway = PriceCatalog(reload=lambda: list(stored), reload_every_s=0)
+    admin.publish(ModelPrice("m", "p", "v1", datetime(2026, 1, 1, tzinfo=UTC), 1, 2))
+    assert gateway.price_at("m").version == "v1"  # no restart needed
+
+
+def test_readiness_ticks_each_setup_step_from_the_live_configuration(env: Any) -> None:
+    from captain.core.registry.service import (
+        InMemoryRegistryStore,
+        ModelEntry,
+        Provider,
+        ProviderKind,
+        RegistryService,
+        Route,
+    )
+    from captain.core.usage.pricing import PriceCatalog
+
+    h, c = env
+    h.built.core.m.registry = reg = RegistryService(InMemoryRegistryStore())
+    h.built.core.m.prices = PriceCatalog()
+
+    def done() -> dict[str, bool]:
+        r = c.get("/admin/v1/readiness", headers=H()).json()
+        return {s["key"]: s["done"] for s in r["steps"]} | {"ready": r["ready_for_keys"]}
+
+    d = done()
+    assert d["ai_use"] and d["budget"] and d["captain_key"]  # from the harness
+    assert not d["model"] and not d["price"] and not d["ready"]
+    reg.upsert_provider(Provider("p1", ProviderKind.OPENAI, "external", "env:X"))
+    reg.upsert_model(ModelEntry("m1", "p1", "m1", "external"))
+    reg.upsert_route(Route("m1", ("m1",)))
+    entry = c.get("/admin/v1/register", headers=H()).json()[0]
+    wider = {**entry, "allowed_models": [*entry["allowed_models"], "m1"]}
+    c.put(f"/admin/v1/register/{entry['id']}", headers=H(), json={"entry": wider})
+    d = done()
+    assert d["model"] and not d["price"]
+    c.put("/admin/v1/prices/m1", headers=H(), json={"input_usd_per_m": 1, "output_usd_per_m": 2})
+    assert done()["price"]

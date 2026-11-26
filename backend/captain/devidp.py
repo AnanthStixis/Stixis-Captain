@@ -17,7 +17,6 @@ import hashlib
 import hmac
 import html
 import json
-import os
 import secrets
 import time
 from dataclasses import dataclass
@@ -195,9 +194,9 @@ def create_idp_app(
 
 
 def create_dev_idp_from_env() -> FastAPI:
-    from captain.envfile import DEFAULT_ENV_FILE, dotenv_values
+    from captain.envfile import current_env
 
-    env = {**dotenv_values(DEFAULT_ENV_FILE), **os.environ}
+    env = current_env()
     secret = env.get("CAPTAIN_DEV_IDP_CLIENT_SECRET")
     if not secret:
         raise SystemExit(

@@ -11,7 +11,6 @@ evidence, no prompts, no people beyond the number of users.
 
 # No `from __future__ import annotations`: FastAPI must resolve the request models.
 import hmac
-import os
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
@@ -32,7 +31,7 @@ from captain.core.engine import admin_event
 from captain.core.factory import BuiltCore
 from captain.core.identity.model import PrincipalRecord
 from captain.core.models import EventType, PrincipalType
-from captain.envfile import DEFAULT_ENV_FILE, dotenv_values
+from captain.envfile import current_env
 
 PLATFORM_ACTOR = "stixis-platform"
 CALL_TYPES = {"call.allowed", "call.masked", "call.refused", "tool.held", "tool.executed"}
@@ -53,7 +52,7 @@ def install_platform_routes(
     invites: InviteService | None,
     env: Mapping[str, str] | None = None,
 ) -> None:
-    e = env if env is not None else {**dotenv_values(DEFAULT_ENV_FILE), **os.environ}
+    e = env if env is not None else current_env()
     token = e.get("CAPTAIN_PLATFORM_TOKEN") or ""
     ids = built.infra.identity_store
 

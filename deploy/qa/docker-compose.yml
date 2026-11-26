@@ -1,0 +1,91 @@
+# Shared Captain on the QA Docker server (ADR-008): ONE stack serves Stixis and every
+# company. Nothing changes per company: Stixis adds a company on captain.<domain> and it is
+# live at once on <code>.<domain>, with its own data in its own database schema.
+#
+#   sh make-env.sh stixis.com certs          # once: writes qa.env and edge/Caddyfile
+#   docker compose --env-file qa.env up -d
+#
+# Only the edge proxy is published (ports 80/443). Scale with e.g.
+#   docker compose --env-file qa.env up -d --scale gateway=2
+name: captain
+
+x-captain: &captain
+  image: ${CAPTAIN_IMAGE:-stixis/captain:qa}
+  restart: unless-stopped
+  env_file: ["qa.env"]
+  environment:
+    CAPTAIN_DATABASE_URL: postgresql+psycopg://captain:${DB_PASSWORD}@postgres:5432/captain
+    CAPTAIN_OPA_URL: http://opa:8181
+    CAPTAIN_MULTI_TENANT: "1"
+    CAPTAIN_TENANT_DATA_DIR: /data          # ledger keys and anchors, one folder per company
+    CAPTAIN_REQUIRE_BUDGET: "true"
+  volumes:
+    - data:/data
+  depends_on:
+    init: { condition: service_completed_successfully }
+
+services:
+  postgres:
+    image: postgres:16.6
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: captain
+      POSTGRES_USER: captain
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in qa.env}
+    command: ["postgres", "-c", "max_connections=300"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U captain -d captain"]
+      interval: 5s
+      retries: 20
+
+  opa:
+    image: openpolicyagent/opa:1.0.0
+    restart: unless-stopped
+    # QA reads the policy files directly. Production runs only a signed bundle (Helm chart).
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=info", "/policies"]
+    volumes: ["../../policies:/policies:ro"]
+
+  init:   # migrates Stixis's schema and every company's schema, then exits
+    <<: *captain
+    restart: "no"
+    command: ["init"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  admin:
+    <<: *captain
+    command: ["admin"]
+
+  gateway:
+    <<: *captain
+    command: ["gateway"]
+
+  core:
+    <<: *captain
+    command: ["core"]
+
+  mcp:
+    <<: *captain
+    command: ["mcp"]
+
+  worker:
+    <<: *captain
+    command: ["worker"]   # one worker process runs every company's worker: keep exactly one
+
+  edge:   # the only published service: routes by address and path
+    image: caddy:2.8.4
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./edge/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./edge/certs:/etc/caddy/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [admin, gateway, core, mcp]
+
+volumes:
+  pgdata:
+  data:
+  caddy_data:
+  caddy_config:

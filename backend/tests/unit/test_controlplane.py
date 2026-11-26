@@ -183,3 +183,83 @@ def test_codes_are_unique_and_shaped_like_opentofu_client_codes() -> None:
     assert cp.post("/admin/v1/companies", json=NEW).status_code == 200
     assert cp.post("/admin/v1/companies", json=NEW).status_code == 409
     assert cp.post("/admin/v1/companies", json={**NEW, "code": "ABC Ltd"}).status_code == 422
+
+
+def test_an_email_in_the_domain_field_is_refused_when_the_company_is_added() -> None:
+    """Regression (live, 2026-11-26): 'admin@ibm.com' was accepted as a domain, and the
+    install refused the bootstrap later with a bare 422."""
+    _, cp = stixis(None)
+    bad = {**NEW, "details": {**NEW["details"], "domains": ["admin@ibm.com"]}}
+    r = cp.post("/admin/v1/companies", json=bad)
+    assert r.status_code == 422 and "not a domain name" in r.text
+    ok = {**NEW, "details": {**NEW["details"], "domains": ["IBM.com"]}}
+    assert cp.post("/admin/v1/companies", json=ok).json()["details"]["domains"] == ["ibm.com"]
+
+
+def test_an_install_refusal_shows_the_installs_reason() -> None:
+    holder: dict[str, Client] = {}
+
+    class Late:
+        def request(self, *a: Any, **kw: Any) -> Any:
+            return holder["c"].http.request(*a, **kw)
+
+    h = CaptainCoreHarness()
+    app = FastAPI()
+    denied_handler(app)
+    secrets = SecretsService(InMemorySecretStore(), LocalKeyWrapper(bytes(range(32))))
+    store = InMemoryCompanyStore()
+    ops = AdminActor("ops", frozenset({"platform-admin"}))
+    install_controlplane_routes(app, h.built, lambda: ops, store, secrets, Late())  # type: ignore[arg-type]
+    cp = TestClient(app)
+    cp.post("/admin/v1/companies", json=NEW)
+    token, _ = token_from_files(cp)
+    holder["c"] = Client(token)
+    cp.put("/admin/v1/companies/abc/install", json={"admin_url": INSTALL})
+    doc = store.get("abc")
+    assert doc is not None
+    doc["org_admin_email"] = "not-an-email"  # an old record saved before validation
+    store.put(doc)
+    r = cp.post("/admin/v1/companies/abc/bootstrap")
+    assert r.status_code == 502 and "The install answered 400: a valid email address" in r.text
+
+
+def test_platform_admin_holds_only_what_the_stixis_console_needs() -> None:
+    """Companies, Stixis staff (users) and the audit trail; nothing that governs a
+    company's own AI use."""
+    assert ROLE_PERMISSIONS["platform-admin"] == {
+        Permission.COMPANIES_WRITE, Permission.USERS_WRITE, Permission.KEYS_READ,
+        Permission.AUDIT_READ,
+    }  # fmt: skip
+    for p in (Permission.BUDGET_WRITE, Permission.AIKEYS_WRITE, Permission.REGISTER_WRITE,
+              Permission.KILL_SWITCH, Permission.USAGE_READ, Permission.CONTENT_READ):  # fmt: skip
+        assert p not in ROLE_PERMISSIONS["platform-admin"]
+
+
+def test_dashboard_counts_companies_and_flags_what_needs_attention() -> None:
+    install = Client("tok-0123456789abcdef0123456789")
+    _, cp = stixis(install)
+    assert cp.get("/admin/v1/companies/dashboard").json()["companies"] == 0
+    cp.post("/admin/v1/companies", json=NEW)
+    cp.post("/admin/v1/companies", json={**NEW, "code": "xyz"})
+    cp.put("/admin/v1/companies/abc/install", json={"admin_url": INSTALL})
+    d = cp.get("/admin/v1/companies/dashboard").json()
+    assert d["companies"] == 2 and d["status"]["onboarding"] == 2
+    assert d["pipeline"] == {"added": 2, "address_set": 1, "bootstrapped": 0, "healthy": 0}
+    assert d["health"]["not_installed"] == 1 and d["health"]["not_checked"] == 1
+    reasons = {a["code"]: a["reason"] for a in d["needs_attention"]}
+    assert "not connected" in reasons["xyz"] and "Check now" in reasons["abc"]
+    _, other = stixis(None, frozenset({"org-admin"}))
+    assert other.get("/admin/v1/companies/dashboard").status_code == 403
+
+
+def test_plain_http_install_addresses_only_for_named_qa_hosts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, cp = stixis(None)
+    cp.post("/admin/v1/companies", json=NEW)
+    url = "http://captain-abc-admin:8100"
+    assert cp.put("/admin/v1/companies/abc/install", json={"admin_url": url}).status_code == 400
+    monkeypatch.setenv("CAPTAIN_INSECURE_INSTALL_HOSTS", "captain-abc-admin")
+    assert cp.put("/admin/v1/companies/abc/install", json={"admin_url": url}).status_code == 200
+    other = {"admin_url": "http://elsewhere:8100"}
+    assert cp.put("/admin/v1/companies/abc/install", json=other).status_code == 400

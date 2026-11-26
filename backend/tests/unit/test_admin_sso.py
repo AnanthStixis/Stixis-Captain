@@ -318,7 +318,12 @@ def test_two_logins_get_different_sessions(env: Env) -> None:
 def test_auth_config_and_security_headers(env: Env) -> None:
     b = env.browser()
     r = b.get("/admin/v1/auth/config")
-    assert r.json() == {"sso": True, "dev_token": True}
+    assert r.json() == {
+        "sso": True,
+        "dev_token": True,
+        "stixis_console": False,
+        "email_link": False,
+    }
     assert r.headers["x-frame-options"] == "DENY" and r.headers["cache-control"] == "no-store"
     assert r.headers["x-content-type-options"] == "nosniff"
 

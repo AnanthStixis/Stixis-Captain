@@ -8,8 +8,20 @@ You are the first administrator of your company's Captain. Stixis has sent you a
 
 ## 2. Connect your company sign-in (SSO)
 Do this first: after it, everyone signs in with their normal work account and the one-time link stops working.
-1. On **Setup**, follow "Connect your sign-in". You need your identity team for one step (registering Captain as an app in Microsoft Entra ID or Okta).
-2. **Expected:** you can sign out, then sign back in with your work account.
+Everything happens on **Setup → Connect your sign-in**; nothing to install or edit on a server.
+1. **Register Captain in your provider** (your identity team, once): a web app called "Captain", with the redirect address shown on the page (press **Copy**), a client secret, and a groups claim in its tokens (Entra: *Token configuration → Add groups claim*).
+2. **Enter its details**: pick Microsoft Entra ID, Okta, Google or Other; enter the tenant ID / Okta domain / issuer, the application (client) ID and the client secret (stored encrypted, never shown again). Optionally map groups to Captain roles (roles given on **Users** also count). **Save**, then **Check connection**. **Expected:** "Captain can reach your provider".
+3. **Test sign-in**: you go to your provider, sign in with **your own** account and come back. **Expected:** "Test sign-in worked". It only passes if that account would be an org admin under SSO, so you cannot lock your company out. Your current session stays open.
+4. **Turn on SSO**. **Expected:** you are signed out; sign in with **Sign in with SSO**. One-time links and email sign-in links stop working.
+- Changing the settings later: edit, **Save**, **Test sign-in** again, then **Use the new settings**. **Turn SSO off** brings back one-time and email links (everyone's SSO session ends).
+
+### No SSO? Sign in with an email link
+If your company has no identity provider, Captain can email a one-time sign-in link instead (no passwords are stored anywhere).
+1. Your Captain needs an email sender: `CAPTAIN_SMTP_HOST`, `_PORT`, `_FROM` (and `_USER` / `_PASSWORD`) plus `CAPTAIN_PUBLIC_CONSOLE_URL` in its settings. Ask whoever runs your install.
+2. Add each person on **Users** with at least one console role.
+3. They open Captain, type their work email and press **Email me a sign-in link**. **Expected:** an email "Your Captain sign-in link"; the link works once, for 15 minutes, and signs them in with the roles you gave them.
+4. Deactivating someone on **Users** ends their session at once. At most 3 links per person per 15 minutes; people who are not users get the same answer but no email.
+5. Connecting SSO later switches email links off automatically.
 
 ## 3. Company details
 **Setup → Company** (or the company settings page): name, domains, country, contacts. **Expected:** saved; the checklist item turns green.

@@ -15,12 +15,10 @@ credentials come from the environment (a vault adapter in production).
 
 from __future__ import annotations
 
-import os
-
 from fastapi import FastAPI
 
 from captain.config import build_from_env
-from captain.envfile import DEFAULT_ENV_FILE, dotenv_values
+from captain.envfile import current_env
 from captain.integrations.api_gateway.provider import EnvSecretResolver
 from captain.integrations.mcp_proxy.app import create_mcp_app
 from captain.integrations.mcp_proxy.upstream import McpUpstream
@@ -28,7 +26,7 @@ from captain.integrations.mcp_proxy.upstream import McpUpstream
 
 def create_mcp_app_from_env() -> FastAPI:
     built, _ = build_from_env()
-    env = {**dotenv_values(DEFAULT_ENV_FILE), **os.environ}
+    env = current_env()
     upstream = McpUpstream(
         EnvSecretResolver(env),
         allow_loopback=env.get("CAPTAIN_MCP_ALLOW_LOOPBACK") == "1",

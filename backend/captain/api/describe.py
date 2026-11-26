@@ -430,7 +430,10 @@ def _settings(et: str, v: dict[str, Any], d: dict[str, Any], who: str, cat: str)
         user = d.get("email") or d.get("user") or d.get("principal_id") or "an administrator"
         text = f"{who} created a sign-in invitation for {user}."
     elif et == "invite.redeemed":
-        text = f"{who} signed in for the first time with an invitation."
+        if d.get("how") == "email link":
+            text = f"{who} signed in with an emailed sign-in link."
+        else:
+            text = f"{who} signed in for the first time with an invitation."
     elif et == EventType.REGISTRY_CHANGED:
         text = f"{who} changed the {d.get('kind')} \"{d.get('key')}\" in Models & tools."
     else:

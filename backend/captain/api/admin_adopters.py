@@ -14,7 +14,6 @@ CAPTAIN_ARTIFACTS_DIR (release packages; default: this repository), CAPTAIN_GUID
 """
 
 # No `from __future__ import annotations`: FastAPI must resolve the local `Actor` alias.
-import os
 from collections import Counter
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -36,14 +35,14 @@ from captain.api.adopters import (
 )
 from captain.core.admin import AdminActor
 from captain.core.identity.rbac import Permission, require
-from captain.envfile import DEFAULT_ENV_FILE, dotenv_values
+from captain.envfile import current_env
 
 CALL_TYPES = {"call.allowed", "call.masked", "call.refused", "call.observed", "tool.held",
               "tool.executed"}  # fmt: skip
 
 
 def settings_from_env(env: Mapping[str, str] | None = None) -> tuple[Urls, Path, Path]:
-    e = env if env is not None else {**dotenv_values(DEFAULT_ENV_FILE), **os.environ}
+    e = env if env is not None else current_env()
     d = Urls()
     urls = Urls(
         gateway=(e.get("CAPTAIN_PUBLIC_GATEWAY_URL") or d.gateway).rstrip("/"),

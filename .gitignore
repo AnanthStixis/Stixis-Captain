@@ -34,3 +34,9 @@ browser/extension/dist/
 
 # Release packages collected by backend/scripts/build_artifacts.ps1
 backend/artifacts/
+
+# QA install env files hold secrets (deploy/qa/make-env.sh)
+deploy/qa/*.env
+deploy/qa/edge/certs/*
+!deploy/qa/edge/certs/.gitkeep
+deploy/qa/edge/Caddyfile

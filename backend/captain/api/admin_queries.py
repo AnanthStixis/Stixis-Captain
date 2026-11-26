@@ -331,6 +331,7 @@ class PgAdminQueries:
                     r.idp_subject,
                     frozenset(r.roles or ()),
                     r.active,
+                    r.job_title,
                 )
                 for r in c.execute(select(s.principals).order_by(s.principals.c.id))
             ]

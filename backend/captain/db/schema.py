@@ -46,6 +46,7 @@ principals = Table(
     Column("idp_subject", String(256), unique=True),
     Column("roles", ARRAY(String(64)), nullable=False, server_default="{}"),
     Column("active", Boolean, nullable=False, server_default="true"),
+    Column("job_title", String(128)),
 )  # fmt: skip
 
 virtual_keys = Table(

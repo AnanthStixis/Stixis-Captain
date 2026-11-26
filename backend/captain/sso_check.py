@@ -13,7 +13,6 @@ browser, which shows the identity provider's consent and login pages work.
 from __future__ import annotations
 
 import json
-import os
 import secrets
 import sys
 from collections.abc import Mapping
@@ -24,7 +23,7 @@ import httpx
 from captain.api.admin_sso import OidcClient, SsoClientConfig, SsoError
 from captain.core.identity.oidc import ALLOWED_ALGS, HttpJwks, IssuerConfig, is_secure_url
 from captain.core.identity.rbac import ROLE_PERMISSIONS
-from captain.envfile import DEFAULT_ENV_FILE, dotenv_values
+from captain.envfile import current_env
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 
@@ -193,7 +192,7 @@ def check_provider(c: Mapping[str, object], http: httpx.Client | None = None) ->
 
 
 def main(argv: list[str]) -> int:
-    env = {**dotenv_values(DEFAULT_ENV_FILE), **os.environ}
+    env = current_env()
     c, findings = check_config(env)
     if c is not None:
         findings += check_provider(c)

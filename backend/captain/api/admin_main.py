@@ -19,7 +19,6 @@ At least one of SSO or the dev token must be configured.
 """
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -38,12 +37,17 @@ from captain.api.admin_queries import PgAdminQueries
 from captain.api.admin_sso import OidcClient, SsoClientConfig, SsoService
 from captain.api.controlplane import PgCompanyStore
 from captain.api.org import INVITE_TTL_S, InviteService, PgOrganizationStore
+from captain.api.signin_mail import mailer_from_env
+from captain.api.sso_live import LiveSso
 from captain.api.state import PgStateStore
 from captain.config import ConfigError, build_from_env, build_secrets
 from captain.core.identity.oidc import HttpJwks, IssuerConfig
-from captain.envfile import DEFAULT_ENV_FILE, dotenv_values
+from captain.envfile import current_env
 
-CONSOLE_DIST = Path(__file__).resolve().parents[3] / "console" / "dist"
+CONSOLE_DIST = Path(
+    current_env().get("CAPTAIN_CONSOLE_DIR")
+    or Path(__file__).resolve().parents[3] / "console" / "dist"
+)
 DEV_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 
 
@@ -76,10 +80,27 @@ def _user_lookup(built: Any) -> Any:
     return lookup
 
 
+def shared_control_plane(env: dict[str, str]) -> dict[str, Any]:
+    """On a shared Captain the Stixis console provisions companies itself and reaches
+    them in-process (ADR-008)."""
+    if env.get("CAPTAIN_CONTROL_PLANE") != "1" or env.get("CAPTAIN_MULTI_TENANT") != "1":
+        return {}
+    from captain.tenancy import active
+
+    a = active()
+    if "router" not in a:
+        return {}
+    return {"company_http": a["router"].local_client(), "provision": a["tenancy"].provision}
+
+
 def create_admin_app_from_env() -> FastAPI:
-    env = {**dotenv_values(DEFAULT_ENV_FILE), **os.environ}
+    env = current_env()
     built, settings = build_from_env()
-    engine = create_engine(settings.database_url, pool_size=10, pool_pre_ping=True)
+    engine = create_engine(
+        settings.database_url,
+        pool_size=int(current_env().get("CAPTAIN_DB_POOL_SIZE", "10")),
+        pool_pre_ping=True,
+    )
     auths: list[AdminAuthenticator] = []
     sso: SsoService | None = None
 
@@ -120,6 +141,23 @@ def create_admin_app_from_env() -> FastAPI:
         )
         auths.append(OidcAdminAuthenticator(mapping, _DiscoveredJwks(sso.client)))
 
+    # SSO: fixed by CAPTAIN_ADMIN_OIDC, or set up by the org admin on the Setup page.
+    console_url = env.get("CAPTAIN_PUBLIC_CONSOLE_URL")
+    secrets_svc = build_secrets(settings, engine)
+    live = LiveSso(
+        PgStateStore(engine, ttl_s=12 * 3600),
+        _user_lookup(built),
+        secrets=secrets_svc,
+        console_url=console_url,
+        fixed=sso,
+        extra_origins=tuple(
+            o.strip() for o in env.get("CAPTAIN_CONSOLE_ORIGINS", DEV_ORIGINS).split(",")
+            if o.strip()
+        ),
+    )  # fmt: skip
+    if sso is None:
+        auths.append(live.bearer())
+
     dev_token = env.get("CAPTAIN_DEV_ADMIN_TOKEN")
     if dev_token:
         # On the Stixis install the dev token may also manage client companies.
@@ -147,11 +185,16 @@ def create_admin_app_from_env() -> FastAPI:
         sso=sso,
         dev_token_enabled=bool(dev_token),
         org_store=PgOrganizationStore(engine),
-        ai_keys=build_secrets(settings, engine),
+        ai_keys=secrets_svc,
+        live_sso=live,
         companies=PgCompanyStore(engine) if env.get("CAPTAIN_CONTROL_PLANE") == "1" else None,
+        **shared_control_plane(env),
+        signin_mailer=mailer_from_env(env),
+        console_url=console_url,
         invites=InviteService(
             PgStateStore(engine, ttl_s=INVITE_TTL_S),
-            sso_enabled=lambda: sso is not None,
-            secure_cookies=sso is not None and sso.cfg.secure_cookies,
+            sso_enabled=lambda: live.get() is not None,
+            secure_cookies=(sso is not None and sso.cfg.secure_cookies)
+            or (console_url or "").startswith("https://"),
         ),
     )

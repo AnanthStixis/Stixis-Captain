@@ -1,6 +1,6 @@
 # ADR-007: Captain as a product for many companies
 
-- Status: Accepted 2026-11-26. Built (steps 1-5 of the product plan).
+- Status: Accepted 2026-11-26. Built (steps 1-5 of the product plan). Hosting model superseded by ADR-008 (one shared Captain); dedicated installs stay available.
 - Related: ADR-005 (erasure), the Azure install (`deploy/opentofu/azure`), `docs/guides/`
 
 ## Context

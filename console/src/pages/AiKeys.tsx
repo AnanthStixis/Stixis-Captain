@@ -184,7 +184,7 @@ export function AiKeysPage() {
   );
 }
 
-function KeyModal({ initial, kinds, onClose, onSaved }: { initial: { provider_id: string; kind: string; base_url: string }; kinds: string[]; onClose: () => void; onSaved: () => Promise<void> }) {
+export function KeyModal({ initial, kinds, onClose, onSaved }: { initial: { provider_id: string; kind: string; base_url: string }; kinds: string[]; onClose: () => void; onSaved: () => Promise<void> }) {
   const isNew = !initial.provider_id;
   const [f, setF] = useState({ ...initial, key: "" });
   const [busy, setBusy] = useState(false);
