@@ -186,6 +186,12 @@ class EventType(StrEnum):
     EVALUATION_SCORED = "evaluation.scored"
     EVALUATION_FAILED = "evaluation.failed"
     SUBJECT_ERASED = "subject.erased"
+    AIKEY_CHANGED = "aikey.changed"
+    COMPANY_CHANGED = "company.changed"
+    USER_CHANGED = "user.changed"
+    ORG_CHANGED = "org.changed"
+    INVITE_CREATED = "invite.created"
+    INVITE_REDEEMED = "invite.redeemed"
 
 
 # ----------------------------------------------------------------- identity/context

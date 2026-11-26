@@ -182,6 +182,14 @@ async def chat(request: Request) -> Any:
     return JSONResponse(payload, status_code=code)
 
 
+@app.get("/v1/models")
+async def models(request: Request) -> Any:
+    """Lets the dashboard's "Test" button check a key against the mock provider."""
+    if not request.headers.get("authorization", "").startswith("Bearer "):
+        return JSONResponse({"error": {"message": "missing key"}}, status_code=401)
+    return {"object": "list", "data": [{"id": "mock-claude", "object": "model"}]}
+
+
 @app.post("/v1/classify")
 async def classify(request: Request) -> Any:
     """Mock guard model (CAPTAIN_GUARD_URLS=http://127.0.0.1:8090): flags a classic

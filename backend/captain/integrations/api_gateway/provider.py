@@ -55,6 +55,40 @@ class EnvSecretResolver:
         return v
 
 
+class StoredSecretResolver:
+    """`captain:<id>`: a company AI key entered on the dashboard and stored encrypted
+    (captain.core.secrets_store). Decrypted here, at call time, and never logged."""
+
+    def __init__(self, secrets: Any) -> None:  # SecretsService
+        self._s = secrets
+
+    def secret(self, ref: str) -> str:
+        kind, _, sid = ref.partition(":")
+        if kind != "captain" or not sid:
+            raise ProviderError(f"credential ref {ref!r} is not a stored AI key", None, False)
+        try:
+            return str(self._s.reveal(sid))
+        except KeyError as e:
+            raise ProviderError("the AI key for this provider was removed", None, False) from e
+        except Exception as e:  # master key unavailable: fail closed, no call is made
+            raise ProviderError(f"the AI key could not be decrypted ({type(e).__name__})",
+                                None, False) from e  # fmt: skip
+
+
+class ChainSecretResolver:
+    """Picks the resolver by the ref's prefix (`env:`, `captain:`, ...)."""
+
+    def __init__(self, by_kind: Mapping[str, SecretResolver]) -> None:
+        self._by = dict(by_kind)
+
+    def secret(self, ref: str) -> str:
+        kind = ref.partition(":")[0]
+        r = self._by.get(kind)
+        if r is None:
+            raise ProviderError(f"credential ref {ref!r}: no resolver for {kind!r}", None, False)
+        return r.secret(ref)
+
+
 class ProviderClient(Protocol):
     def complete(self, target: ProviderTarget, body: dict[str, Any]) -> dict[str, Any]: ...
     def stream(self, target: ProviderTarget, body: dict[str, Any]) -> Iterator[dict[str, Any]]: ...

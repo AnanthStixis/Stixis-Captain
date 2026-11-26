@@ -13,6 +13,11 @@ existingSecret: captain-secrets
 env:
   CAPTAIN_OPA_URL: http://captain-opa:8181
   CAPTAIN_REQUIRE_BUDGET: "true"
+  # How people reach this install: used in downloads and guides on "Connect your tools".
+  CAPTAIN_PUBLIC_GATEWAY_URL: https://captain.example.com # CHANGE
+  CAPTAIN_PUBLIC_MCP_URL: https://captain.example.com/mcp # CHANGE
+  CAPTAIN_PUBLIC_CORE_URL: https://captain-core.example.com # CHANGE
+  CAPTAIN_PUBLIC_CONSOLE_URL: https://captain-admin.example.com # CHANGE
 
 replicas:
   gateway: 2

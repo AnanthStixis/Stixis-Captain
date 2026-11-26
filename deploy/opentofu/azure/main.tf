@@ -258,6 +258,17 @@ resource "azurerm_key_vault_key" "ledger" {
   depends_on   = [azurerm_role_assignment.deployer_kv]
 }
 
+# Wraps the per-key data keys of company AI keys entered on the dashboard (plan step 3).
+# RSA, wrap/unwrap only: the private half never leaves Key Vault.
+resource "azurerm_key_vault_key" "secrets" {
+  name         = "captain-secrets"
+  key_vault_id = azurerm_key_vault.captain.id
+  key_type     = local.prod ? "RSA-HSM" : "RSA"
+  key_size     = 3072
+  key_opts     = ["wrapKey", "unwrapKey"]
+  depends_on   = [azurerm_role_assignment.deployer_kv]
+}
+
 resource "random_id" "pepper" {
   byte_length = 32
 }
@@ -285,6 +296,12 @@ resource "azurerm_key_vault_secret" "pepper" {
 # Pods: sign with the ledger key, read the secrets.
 resource "azurerm_role_assignment" "pods_crypto" {
   scope                = azurerm_key_vault_key.ledger.resource_versionless_id
+  role_definition_name = "Key Vault Crypto User"
+  principal_id         = azurerm_user_assigned_identity.captain.principal_id
+}
+
+resource "azurerm_role_assignment" "pods_wrap" {
+  scope                = azurerm_key_vault_key.secrets.resource_versionless_id
   role_definition_name = "Key Vault Crypto User"
   principal_id         = azurerm_user_assigned_identity.captain.principal_id
 }

@@ -84,9 +84,25 @@ export const api = {
 };
 
 /** Authenticated file download (evidence zip, XLSX, CSV). */
+/** Plain text (for example a guide in markdown). */
+export async function getText(path: string): Promise<string> {
+  const res = await fetch(`/admin/v1${path}`, { credentials: "same-origin", headers: authHeaders("GET") });
+  if (!res.ok) throw new ApiError(res.status, "ERROR", `could not load (${res.status})`);
+  return res.text();
+}
+
 export async function download(path: string, fallbackName: string): Promise<void> {
   const res = await fetch(`/admin/v1${path}`, { credentials: "same-origin", headers: authHeaders("GET") });
-  if (!res.ok) throw new ApiError(res.status, "DOWNLOAD_FAILED", `download failed (${res.status})`);
+  if (!res.ok) {
+    let message = `download failed (${res.status})`;
+    try {
+      const j = await res.json();
+      message = (j.detail ?? j).message ?? message;
+    } catch {
+      /* not JSON */
+    }
+    throw new ApiError(res.status, "DOWNLOAD_FAILED", message);
+  }
   const blob = await res.blob();
   const cd = res.headers.get("Content-Disposition") ?? "";
   const name = /filename="([^"]+)"/.exec(cd)?.[1] ?? fallbackName;
@@ -216,6 +232,13 @@ export interface EventItem {
   details: Record<string, unknown> | null;
   entry_hash: string;
   anchor_id: string | null;
+  // Plain-language description (backend captain/api/describe.py)
+  headline: string;
+  outcome: string;
+  outcome_tone: string;
+  category: string;
+  who: string;
+  why: string | null;
 }
 
 export interface KeyView {
@@ -294,6 +317,8 @@ export interface Alert {
   created_at: string;
   delivered: boolean;
   attempts: number;
+  title: string;
+  what_to_do: string;
 }
 
 export type CoverageClass = "GOVERNED" | "OBSERVED" | "BYPASS_DETECTED" | "UNOBSERVED";
@@ -346,4 +371,43 @@ export interface RateLimit {
   scope: string;
   requests_per_minute: number | null;
   tokens_per_minute: number | null;
+}
+
+// ------------------------------------------------- company, users, setup
+export interface UserView {
+  id: string;
+  email: string;
+  name: string;
+  team: string | null;
+  roles: string[];
+  active: boolean;
+  keys_revoked?: number;
+}
+
+export interface Contact {
+  role: string;
+  name: string;
+  email: string;
+}
+
+export interface Organization {
+  company_name: string;
+  legal_name: string;
+  domains: string[];
+  country: string;
+  industry: string;
+  contacts: Contact[];
+  adopters: string[];
+  checklist: Record<string, boolean>;
+  updated_at: string | null;
+  updated_by: string | null;
+  sso_configured: boolean;
+  checklist_items: { key: string; label: string; done: boolean }[];
+}
+
+/** Turns a one-time org-admin invite into a console session (cookie + CSRF token). */
+export async function redeemInvite(token: string): Promise<SessionInfo> {
+  const s = await api.post<SessionInfo>("/auth/invite/redeem", { token });
+  setCsrf(s.csrf_token);
+  return s;
 }

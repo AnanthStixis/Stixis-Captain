@@ -31,3 +31,6 @@ sdk/dotnet/**/obj/
 
 # browser extension build output
 browser/extension/dist/
+
+# Release packages collected by backend/scripts/build_artifacts.ps1
+backend/artifacts/

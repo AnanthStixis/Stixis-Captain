@@ -272,6 +272,46 @@ subject_keys = Table(
     Column("created_at", TS, nullable=False),
 )  # fmt: skip
 
+# Company profile (rev 0010). One row per install: each company has its own install.
+organization = Table(
+    "organization", metadata,
+    Column("id", String(32), primary_key=True),
+    Column("company_name", String(200), nullable=False, server_default=""),
+    Column("legal_name", String(300), nullable=False, server_default=""),
+    Column("domains", ARRAY(String(253)), nullable=False, server_default="{}"),
+    Column("country", String(64), nullable=False, server_default=""),
+    Column("industry", String(120), nullable=False, server_default=""),
+    Column("contacts", JSONB, nullable=False, server_default="[]"),
+    Column("adopters", ARRAY(String(64)), nullable=False, server_default="{}"),
+    Column("checklist", JSONB, nullable=False, server_default="{}"),
+    Column("updated_at", TS, nullable=False),
+    Column("updated_by", String(256), nullable=False),
+)  # fmt: skip
+
+# Company AI keys (plan step 3): envelope-encrypted, see captain/core/secrets_store.py.
+# Deleting a row destroys the key. Never append-only.
+provider_secrets = Table(
+    "provider_secrets", metadata,
+    Column("id", String(32), primary_key=True),
+    Column("provider_id", String(128), nullable=False, index=True),
+    Column("ciphertext", LargeBinary, nullable=False),
+    Column("nonce", LargeBinary, nullable=False),
+    Column("wrapped_dek", LargeBinary, nullable=False),
+    Column("wrap_key_id", String(160), nullable=False),
+    Column("last4", String(4), nullable=False),
+    Column("created_by", String(256), nullable=False),
+    Column("created_at", TS, nullable=False),
+)  # fmt: skip
+
+# Control plane (Stixis install only, CAPTAIN_CONTROL_PLANE=1): the client companies. Each
+# company's platform token is in provider_secrets (encrypted); this row holds its id only.
+cp_companies = Table(
+    "cp_companies", metadata,
+    Column("code", String(32), primary_key=True),
+    Column("doc", JSONB, nullable=False),
+    Column("updated_at", TS, nullable=False),
+)  # fmt: skip
+
 APPEND_ONLY_TABLES = ("evidence_ledger",)
 
 # Tables created by later migrations. Revision 0001 must not create them.
@@ -282,4 +322,7 @@ TABLES_SINCE = {
     "0006": ("budget_alert_marks",),
     "0007": ("api_state",),
     "0009": ("subject_keys",),
+    "0010": ("organization",),
+    "0011": ("provider_secrets",),
+    "0012": ("cp_companies",),
 }

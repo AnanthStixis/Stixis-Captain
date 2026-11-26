@@ -457,7 +457,8 @@ def test_csv_exports_neutralise_formulas_and_match_the_json(env: Any) -> None:
     lines = r.text.strip().split("\n")
     assert lines[0].startswith("key,calls,refused") and lines[1].startswith("svc,1,1,")
     ev = c.get("/admin/v1/events.csv?days=7", headers=H())
-    assert ev.status_code == 200 and ev.text.split("\n")[0].startswith("recorded_at,event_type")
+    header = ev.text.splitlines()[0]
+    assert ev.status_code == 200 and header.startswith("recorded_at,who,headline,outcome,why")
     assert c.get("/admin/v1/events.csv").status_code == 401
     from captain.api.admin_http import _csv_cell
 

@@ -828,3 +828,40 @@ def test_a_person_recreated_after_erasure_gets_a_new_pseudonym_in_every_process(
     new = gateway.person("ravi@example.com")  # the same id, now a new person
     assert new != old and new.startswith("subj_")
     assert admin.display(old) == ERASED and admin.display(new) == "ravi@example.com"
+
+
+def test_pg_secret_store_holds_only_ciphertext(pg: Engine) -> None:
+    """Company AI keys on PostgreSQL (plan step 3): the row holds no readable key, the
+    service decrypts it, and deleting the row destroys it."""
+    from sqlalchemy import text as sql
+
+    from captain.core.secrets_store import LocalKeyWrapper, SecretsService
+    from captain.db.stores import PgSecretStore
+
+    key = "fake-ai-key-for-pg-test-6789"
+    svc = SecretsService(PgSecretStore(pg), LocalKeyWrapper(bytes(range(32))))
+    stored = svc.put("openai", key, "priya@corp.example")
+    with pg.connect() as c:
+        raw = c.execute(sql("select * from provider_secrets")).mappings().one()
+    assert key.encode() not in b"".join(
+        bytes(v) for v in raw.values() if isinstance(v, bytes | memoryview)
+    )
+    assert raw["last4"] == "6789"
+    fresh = SecretsService(PgSecretStore(pg), LocalKeyWrapper(bytes(range(32))))  # another process
+    assert fresh.reveal(stored.id) == key
+    assert [s.id for s in fresh.store.all()] == [stored.id]
+    assert svc.delete(stored.id) and fresh.store.get(stored.id) is None
+
+
+def test_pg_company_store_round_trip(pg: Engine) -> None:
+    """Control plane companies on PostgreSQL (plan step 5): insert, update, list."""
+    from captain.api.controlplane import PgCompanyStore
+
+    st = PgCompanyStore(pg)
+    st.put({"code": "abc", "status": "onboarding", "details": {"company_name": "ABC"}})
+    st.put({"code": "xyz", "status": "active", "details": {"company_name": "XYZ"}})
+    st.put({"code": "abc", "status": "active", "details": {"company_name": "ABC Pvt Ltd"}})
+    got = st.get("abc")
+    assert got is not None and got["status"] == "active"
+    assert got["details"]["company_name"] == "ABC Pvt Ltd"
+    assert [d["code"] for d in st.all()] == ["abc", "xyz"] and st.get("nope") is None

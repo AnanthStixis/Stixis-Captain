@@ -18,6 +18,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.engine import Engine
 
+from captain.api.describe import describe, describe_alert
 from captain.core.alerts import Alert, InMemoryAlertStore
 from captain.core.approvals.service import InMemoryApprovalStore
 from captain.core.budget.model import BudgetDefinition, Period, RateLimitDefinition
@@ -74,10 +75,18 @@ def alert_view(a: Alert) -> dict[str, Any]:
         "created_at": a.created_at,
         "delivered": a.delivered,
         "attempts": a.attempts,
+        **describe_alert(a.kind),
     }
 
 
 def event_view(e: LedgerEntry) -> dict[str, Any]:
+    """An event as the dashboard shows it: the stored facts plus a plain-language
+    description (headline, outcome, why) for people who are not engineers."""
+    v = _raw_view(e)
+    return {**v, **describe(v)}
+
+
+def _raw_view(e: LedgerEntry) -> dict[str, Any]:
     b = e.body
     usage = b.get("usage") or {}
     return {

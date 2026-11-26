@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import hmac
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -34,6 +34,9 @@ class AdminSsoConfig:
     roles_claim: str = "groups"  # Entra ID: "groups" or "roles"; Okta: "groups"
     group_roles: Mapping[str, tuple[str, ...]] | None = None  # IdP group -> Captain roles
     name_claim: str = "preferred_username"
+    # Looks up the person's Captain user record by email / user name (lowercased):
+    # None = no record; otherwise (active, roles). Roles granted there ADD to the IdP's.
+    user_lookup: Callable[[str], tuple[bool, frozenset[str]] | None] | None = None
 
 
 class NoRoleError(AuthenticationError):
@@ -69,9 +72,24 @@ def actor_from_claims(cfg: AdminSsoConfig, claims: Mapping[str, object]) -> Admi
     roles = frozenset(
         r for g in names for r in (mapping.get(str(g)) or folded.get(str(g).casefold(), ()))
     )
+    name = str(claims.get(cfg.name_claim) or claims["sub"])
+    if cfg.user_lookup is not None:
+        seen: set[str] = set()
+        for v in (claims.get("email"), claims.get(cfg.name_claim)):
+            if not isinstance(v, str) or not v.strip() or v.strip().lower() in seen:
+                continue
+            key = v.strip().lower()
+            seen.add(key)
+            rec = cfg.user_lookup(key)
+            if rec is None:
+                continue
+            active, extra = rec
+            if not active:  # deactivated in Captain: refused whatever the IdP says
+                raise NoRoleError("your Captain access has been deactivated")
+            roles = roles | extra
     if not roles:
         raise NoRoleError("signed in, but no Captain role is mapped to your groups")
-    return AdminActor(str(claims.get(cfg.name_claim) or claims["sub"]), roles)
+    return AdminActor(name, roles)
 
 
 class OidcAdminAuthenticator:
@@ -93,11 +111,15 @@ class DevTokenAuthenticator:
 
     LOOPBACK = {"127.0.0.1", "::1", "localhost", "testclient"}
 
-    def __init__(self, token: str, actor_id: str = "dev-admin") -> None:
+    def __init__(
+        self, token: str, actor_id: str = "dev-admin", extra_roles: frozenset[str] = frozenset()
+    ) -> None:
         if len(token) < 32:
             raise ValueError("dev admin token must be at least 32 characters")
         self._token = token
-        self._actor = AdminActor(actor_id, frozenset({"admin", "approver", "auditor"}))
+        self._actor = AdminActor(
+            actor_id, frozenset({"admin", "approver", "auditor"}) | extra_roles
+        )
         log.warning("DEV admin token authentication is ENABLED (development only)")
 
     def authenticate(self, token: str, client_host: str | None) -> AdminActor:

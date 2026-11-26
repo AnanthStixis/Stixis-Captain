@@ -175,6 +175,10 @@ class RegistryService:
     def __init__(self, store: RegistryStore) -> None:
         self._s = store
 
+    # --------------------------------------------------------------- reads
+    def provider(self, id: str) -> Provider | None:
+        return self._s.provider(id)
+
     # -------------------------------------------------------------- writes
     def upsert_provider(self, p: Provider) -> None:
         self._s.put_provider(p)

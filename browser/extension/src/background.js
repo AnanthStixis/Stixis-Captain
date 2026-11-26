@@ -4,12 +4,17 @@ import { buildRequest, interpret, onUnreachable, tooLong } from "./core.js";
 
 async function config() {
   // Managed (IT-deployed) settings win over what the user typed on the options page.
-  const [managed, local] = await Promise.all([
+  // A package downloaded from the Captain dashboard carries preset.json with that install's
+  // address (never a key), used when neither IT nor the user has set one.
+  const [managed, local, preset] = await Promise.all([
     chrome.storage.managed.get(["captainUrl", "captainKey", "failMode"]).catch(() => ({})),
     chrome.storage.local.get(["captainUrl", "captainKey", "failMode"]),
+    fetch(chrome.runtime.getURL("preset.json"))
+      .then((r) => (r.ok ? r.json() : {}))
+      .catch(() => ({})),
   ]);
   return {
-    captainUrl: managed.captainUrl || local.captainUrl,
+    captainUrl: managed.captainUrl || local.captainUrl || preset.captainUrl,
     captainKey: managed.captainKey || local.captainKey,
     failMode: managed.failMode || local.failMode || "closed",
   };

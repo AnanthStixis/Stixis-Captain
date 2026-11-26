@@ -14,6 +14,9 @@ RUN useradd --uid 10001 --no-create-home captain
 COPY --from=build /install /usr/local
 COPY alembic.ini ./
 COPY migrations ./migrations
+# Release packages and guides offered on "Connect your tools" (scripts/build_artifacts.ps1).
+COPY artifacts /app/artifacts
+ENV CAPTAIN_ARTIFACTS_DIR=/app/artifacts CAPTAIN_GUIDES_DIR=/app/artifacts/docs/guides
 USER 10001
 ENV PYTHONUNBUFFERED=1
 CMD ["python", "-m", "captain.workers"]

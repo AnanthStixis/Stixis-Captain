@@ -36,6 +36,7 @@ from captain.core.identity.model import KeyRecord, KeyStatus, PrincipalRecord
 from captain.core.identity.oidc import WorkloadBinding
 from captain.core.ledger.chain import Anchor, LedgerEntry
 from captain.core.models import ApprovalState, ApprovalTicket, Environment, RegisterEntry
+from captain.core.secrets_store import StoredSecret
 from captain.core.usage.pricing import ModelPrice, PriceCatalog
 from captain.db import schema as s
 
@@ -911,3 +912,42 @@ class PgSubjectStore:
         with self._e.begin() as c:
             r = c.execute(delete(t).where(t.c.subject.startswith(prefix), t.c.created_at < before))
         return int(r.rowcount or 0)
+
+
+class PgSecretStore:
+    """Encrypted company AI keys (captain.core.secrets_store). Holds ciphertext only."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._e = engine
+
+    @staticmethod
+    def _row(r: Any) -> StoredSecret:
+        return StoredSecret(
+            id=r.id, provider_id=r.provider_id, ciphertext=bytes(r.ciphertext),
+            nonce=bytes(r.nonce), wrapped_dek=bytes(r.wrapped_dek), wrap_key_id=r.wrap_key_id,
+            last4=r.last4, created_by=r.created_by, created_at=r.created_at,
+        )  # fmt: skip
+
+    def put(self, x: StoredSecret) -> None:
+        with self._e.begin() as c:
+            c.execute(insert(s.provider_secrets).values(
+                id=x.id, provider_id=x.provider_id, ciphertext=x.ciphertext, nonce=x.nonce,
+                wrapped_dek=x.wrapped_dek, wrap_key_id=x.wrap_key_id, last4=x.last4,
+                created_by=x.created_by, created_at=x.created_at,
+            ))  # fmt: skip
+
+    def get(self, secret_id: str) -> StoredSecret | None:
+        t = s.provider_secrets
+        with self._e.connect() as c:
+            r = c.execute(select(t).where(t.c.id == secret_id)).first()
+        return self._row(r) if r else None
+
+    def all(self) -> list[StoredSecret]:
+        t = s.provider_secrets
+        with self._e.connect() as c:
+            return [self._row(r) for r in c.execute(select(t).order_by(t.c.created_at))]
+
+    def delete(self, secret_id: str) -> bool:
+        t = s.provider_secrets
+        with self._e.begin() as c:
+            return bool(c.execute(delete(t).where(t.c.id == secret_id)).rowcount)

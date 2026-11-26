@@ -26,7 +26,11 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
+from captain.api.admin_adopters import install_adopter_routes
+from captain.api.admin_aikeys import install_aikey_routes
 from captain.api.admin_auth import AdminAuthenticator
+from captain.api.admin_org import install_org_routes
+from captain.api.admin_platform import install_platform_routes
 from captain.api.admin_queries import (
     AdminQueries,
     ResolvingQueries,
@@ -36,7 +40,9 @@ from captain.api.admin_queries import (
     principal_view,
 )
 from captain.api.admin_sso import LOGIN_TTL_S, CsrfError, LoginCookie, SsoError, SsoService
+from captain.api.controlplane import CompanyStore, install_controlplane_routes
 from captain.api.limits import BodyLimitMiddleware
+from captain.api.org import InMemoryOrganizationStore, InviteService, OrganizationStore
 from captain.core.admin import AdminActor, AdminService
 from captain.core.budget.model import BudgetDefinition, Period, RateLimitDefinition
 from captain.core.context.service import ControlDowngradeError
@@ -74,6 +80,7 @@ from captain.core.reporting.monthly import (
     report_sheets,
     to_xlsx,
 )
+from captain.core.secrets_store import SecretsService
 from captain.core.usage.reports import chargeback, settled_costs, to_csv
 
 log = logging.getLogger("captain.admin")
@@ -297,6 +304,10 @@ def create_admin_app(
     static_dir: Path | None = None,
     sso: SsoService | None = None,
     dev_token_enabled: bool = False,
+    org_store: OrganizationStore | None = None,
+    invites: InviteService | None = None,
+    ai_keys: SecretsService | None = None,
+    companies: CompanyStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Captain Admin API", version="1", docs_url=None, redoc_url=None)
     app.add_middleware(BodyLimitMiddleware, max_bytes=1_000_000)  # admin bodies are small
@@ -358,11 +369,19 @@ def create_admin_app(
     async def _val(_: Request, e: ValueError) -> JSONResponse:
         return JSONResponse({"error": "INVALID", "message": str(e)}, status_code=400)
 
-    def session_of(request: Request) -> tuple[AdminActor, str] | None:
+    def sso_session_of(request: Request) -> tuple[AdminActor, str] | None:
         if sso is None:
             return None
         sid = request.cookies.get(sso.cookie_name)
         return sso.sessions.get(sid) if sid else None
+
+    def invite_session_of(request: Request) -> tuple[AdminActor, str] | None:
+        if invites is None:
+            return None  # refused (None) as soon as SSO is configured
+        return invites.session(request.cookies.get(invites.cookie_name))
+
+    def session_of(request: Request) -> tuple[AdminActor, str] | None:
+        return sso_session_of(request) or invite_session_of(request)
 
     def actor(
         request: Request, authorization: Annotated[str | None, Header()] = None
@@ -370,9 +389,13 @@ def create_admin_app(
         if authorization and authorization.startswith("Bearer "):
             host = request.client.host if request.client else None
             return auth.authenticate(authorization[7:].strip(), host)
-        if sso is not None and (s := session_of(request)) is not None:
+        if sso is not None and (s := sso_session_of(request)) is not None:
             a, csrf = s
             sso.check_csrf(request.method, request.headers, csrf)  # cookie => CSRF defence
+            return a
+        if invites is not None and (s := invite_session_of(request)) is not None:
+            a, csrf = s
+            invites.check_csrf(request.method, request.headers, csrf)
             return a
         raise AuthenticationError("sign in required")
 
@@ -389,6 +412,15 @@ def create_admin_app(
     def can(a: AdminActor, p: Permission) -> AdminActor:
         require(a.roles, p)
         return a
+
+    # One company-profile store, shared by the org pages and the platform bootstrap.
+    org_store = org_store or InMemoryOrganizationStore()
+    install_org_routes(app, built, admin, queries, actor, org_store, invites, sso, session_of)
+    install_platform_routes(app, built, queries, org_store, invites)
+    if companies is not None:  # Stixis's own install only (CAPTAIN_CONTROL_PLANE=1)
+        install_controlplane_routes(app, built, actor, companies, ai_keys)
+    install_aikey_routes(app, built, admin, queries, actor, ai_keys)
+    install_adopter_routes(app, queries, actor)
 
     # ------------------------------------------------------------------- me
     @app.get("/admin/v1/me")
@@ -588,7 +620,8 @@ def create_admin_app(
         register_id: str | None = None,
     ) -> Response:
         data = events(a, days, kind, decision, principal_id, register_id, 1000, 0)
-        fields = ["recorded_at", "event_type", "channel", "coverage", "principal_id",
+        fields = ["recorded_at", "who", "headline", "outcome", "why", "category",
+                  "event_type", "channel", "coverage", "principal_id",
                   "register_id", "decision", "reason_code", "policy_version", "model", "tool",
                   "risk_level", "cost_micros", "input_tokens", "output_tokens", "request_id",
                   "trace_id"]  # fmt: skip

@@ -29,7 +29,12 @@ if ($Uninstall) {
     Write-Output "removed"
     exit 0
 }
-if (-not $CaptainUrl -or -not $KeyFile) { throw "Pass -CaptainUrl and -KeyFile (or -Uninstall)." }
+# A package downloaded from the Captain dashboard carries captain.json with the address.
+$preset = Join-Path $PSScriptRoot "captain.json"
+if (-not $CaptainUrl -and (Test-Path $preset)) {
+    $CaptainUrl = (Get-Content -LiteralPath $preset -Raw | ConvertFrom-Json).captainUrl
+}
+if (-not $CaptainUrl -or -not $KeyFile) { throw "Pass -CaptainUrl (or keep captain.json next to this script) and -KeyFile, or -Uninstall." }
 
 New-Item -ItemType Directory -Force $Dir | Out-Null
 Copy-Item (Join-Path $PSScriptRoot "Invoke-CaptainDesktopAgent.ps1") $Dir -Force

@@ -1,17 +1,28 @@
-import { Button, Code, Drawer, Group, Pagination, ScrollArea, Select, Stack, Table, Text, Title } from "@mantine/core";
+import { Accordion, Badge, Button, Drawer, Group, Pagination, ScrollArea, Select, Stack, Table, Text, Title } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api, type EventItem } from "../api";
-import { DecisionBadge, PageHeader, QueryState, RiskBadge } from "../components/common";
+import { PageHeader, QueryState } from "../components/common";
 import { money, when } from "../format";
 
 const PAGE = 25;
 
-// What the guardrails found (kinds and counts only, never the values).
-function detected(e: EventItem): string | null {
-  const d = e.details?.detected;
-  return typeof d === "string" && d ? d : null;
+// Result filter in plain words -> the decision Captain recorded.
+const RESULTS = [
+  { value: "ALLOW", label: "Allowed" },
+  { value: "ALLOW_WITH_REDACTION", label: "Allowed, data hidden" },
+  { value: "ALLOW_WITH_LIMITS", label: "Allowed with limits" },
+  { value: "REQUIRE_APPROVAL", label: "Waiting for approval" },
+  { value: "BLOCK", label: "Blocked" },
+];
+
+export function OutcomeBadge({ e }: { e: Pick<EventItem, "outcome" | "outcome_tone"> }) {
+  return (
+    <Badge color={e.outcome_tone || "gray"} variant="light" miw="max-content">
+      {e.outcome}
+    </Badge>
+  );
 }
 
 export function EventsPage() {
@@ -27,22 +38,22 @@ export function EventsPage() {
     <>
       <PageHeader
         title="Activity"
-        description="Every governed decision and settled call. Prompt and response content is never stored or shown."
+        description="What happened with AI in your organisation: who used it, what Captain decided and why, and what it cost. The text people typed and the AI's answers are never stored or shown here."
         actions={
           <Group>
             <Button component="a" variant="default" download href={`/admin/v1/events.csv?days=${days}${decision ? `&decision=${decision}` : ""}`}>
               Download CSV
             </Button>
             <Select
-              aria-label="Decision"
-              placeholder="All decisions"
+              aria-label="Result"
+              placeholder="All results"
               clearable
               value={decision}
               onChange={(v) => {
                 setDecision(v);
                 setPage(1);
               }}
-              data={["ALLOW", "ALLOW_WITH_LIMITS", "ALLOW_WITH_REDACTION", "REQUIRE_APPROVAL", "BLOCK"]}
+              data={RESULTS}
               w={220}
             />
             <Select
@@ -62,44 +73,36 @@ export function EventsPage() {
           </Group>
         }
       />
-      <QueryState isLoading={q.isLoading} error={q.error} empty={q.data?.total === 0} emptyText="No activity in this period.">
+      <QueryState isLoading={q.isLoading} error={q.error} empty={q.data?.total === 0} emptyText="Nothing happened in this period.">
         <ScrollArea>
           <Table striped highlightOnHover miw={900}>
             <Table.Thead>
               <Table.Tr>
-                <Table.Th>Time</Table.Th>
-                <Table.Th>Event</Table.Th>
-                <Table.Th>Decision</Table.Th>
-                <Table.Th>Reason</Table.Th>
-                <Table.Th>System</Table.Th>
-                <Table.Th>Model / tool</Table.Th>
-                <Table.Th>Risk</Table.Th>
+                <Table.Th>When</Table.Th>
+                <Table.Th>Who</Table.Th>
+                <Table.Th>What happened</Table.Th>
+                <Table.Th>Result</Table.Th>
+                <Table.Th>AI system</Table.Th>
                 <Table.Th ta="right">Cost</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {q.data?.items.map((e) => (
                 <Table.Tr key={e.event_id} onClick={() => e.request_id && setOpen(e.request_id)} style={{ cursor: e.request_id ? "pointer" : undefined }}>
-                  <Table.Td>{when(e.recorded_at)}</Table.Td>
+                  <Table.Td miw={150}>{when(e.recorded_at)}</Table.Td>
+                  <Table.Td>{e.who}</Table.Td>
                   <Table.Td>
-                    <Code>{e.event_type}</Code>
-                  </Table.Td>
-                  <Table.Td>
-                    <DecisionBadge value={e.decision} />
-                  </Table.Td>
-                  <Table.Td>
-                    {e.reason_code?.replaceAll("_", " ") ?? ""}
-                    {detected(e) && (
+                    <Text size="sm">{e.headline}</Text>
+                    {e.why && (
                       <Text size="xs" c="dimmed">
-                        found: {detected(e)}
+                        {e.why}
                       </Text>
                     )}
                   </Table.Td>
-                  <Table.Td>{e.register_id}</Table.Td>
-                  <Table.Td>{e.model ?? e.tool ?? ""}</Table.Td>
                   <Table.Td>
-                    <RiskBadge value={e.risk_level} />
+                    <OutcomeBadge e={e} />
                   </Table.Td>
+                  <Table.Td>{e.register_id}</Table.Td>
                   <Table.Td ta="right">
                     {e.cost_micros != null ? money(e.cost_micros) : ""}
                     {e.usage_source && e.usage_source !== "PROVIDER_REPORTED" ? " (est.)" : ""}
@@ -121,51 +124,74 @@ export function EventsPage() {
 function RequestDrawer({ id, onClose }: { id: string | null; onClose: () => void }) {
   const q = useQuery({ queryKey: ["request", id], queryFn: () => api.get<{ events: EventItem[] }>(`/requests/${id}`), enabled: !!id });
   return (
-    <Drawer opened={!!id} onClose={onClose} title="Request detail" position="right" size="lg">
+    <Drawer opened={!!id} onClose={onClose} title="What happened with this request" position="right" size="lg">
       <QueryState isLoading={q.isLoading} error={q.error}>
         <Stack>
-          <Text size="sm" c="dimmed">
-            Request {id}
-          </Text>
           {q.data?.events.map((e) => (
-            <Stack key={e.event_id} gap={4}>
-              <Group justify="space-between">
-                <Title order={5}>{e.event_type}</Title>
-                <DecisionBadge value={e.decision} />
+            <Stack key={e.event_id} gap={6}>
+              <Group justify="space-between" wrap="nowrap" align="flex-start">
+                <Title order={5}>{e.headline}</Title>
+                <OutcomeBadge e={e} />
               </Group>
-              <Table>
-                <Table.Tbody>
-                  {(
-                    [
-                      ["Time", when(e.recorded_at)],
-                      ["Principal", e.principal_id],
-                      ["System", e.register_id],
-                      ["Channel / coverage", `${e.channel ?? ""} / ${e.coverage ?? ""}`],
-                      ["Reason", e.reason_code],
-                      ["Found in the request", detected(e)],
-                      ["Policy", e.policy_version],
-                      ["Risk", e.risk_level ? `${e.risk_level} (${e.risk_score})` : null],
-                      ["Tokens in / out", e.input_tokens != null ? `${e.input_tokens} / ${e.output_tokens}` : null],
-                      ["Cost", e.cost_micros != null ? `${money(e.cost_micros)} (${e.usage_source})` : null],
-                      ["Latency", e.latency_ms != null ? `${e.latency_ms} ms` : null],
-                      ["Ledger", `${e.partition} #${e.seq}${e.anchor_id ? ` · anchored ${e.anchor_id}` : " · not yet anchored"}`],
-                    ] as [string, string | null][]
-                  )
-                    .filter(([, v]) => v)
-                    .map(([k, v]) => (
-                      <Table.Tr key={k}>
-                        <Table.Td c="dimmed" w={160}>
-                          {k}
-                        </Table.Td>
-                        <Table.Td>{v}</Table.Td>
-                      </Table.Tr>
-                    ))}
-                </Table.Tbody>
-              </Table>
+              {e.why && <Text size="sm">{e.why}</Text>}
+              <Text size="xs" c="dimmed">
+                {when(e.recorded_at)} · {e.category}
+                {e.cost_micros != null ? ` · ${money(e.cost_micros)}` : ""}
+              </Text>
+              <TechnicalDetails e={e} />
             </Stack>
           ))}
+          <Text size="xs" c="dimmed">
+            Request {id}
+          </Text>
         </Stack>
       </QueryState>
     </Drawer>
+  );
+}
+
+// The raw evidence, for administrators and auditors. Collapsed by default.
+export function TechnicalDetails({ e }: { e: EventItem }) {
+  const detected = typeof e.details?.detected === "string" ? e.details.detected : null;
+  const rows = (
+    [
+      ["Event type", e.event_type],
+      ["Decision", e.decision],
+      ["Reason code", e.reason_code],
+      ["Who (id)", e.principal_id],
+      ["AI system", e.register_id],
+      ["Model / tool", e.model ?? e.tool],
+      ["Channel / coverage", `${e.channel ?? ""} / ${e.coverage ?? ""}`],
+      ["Found in the request", detected],
+      ["Policy", e.policy_version],
+      ["Risk", e.risk_level ? `${e.risk_level} (${e.risk_score})` : null],
+      ["Tokens in / out", e.input_tokens != null ? `${e.input_tokens} / ${e.output_tokens}` : null],
+      ["Cost", e.cost_micros != null ? `${money(e.cost_micros)} (${e.usage_source})` : null],
+      ["Latency", e.latency_ms != null ? `${e.latency_ms} ms` : null],
+      ["Evidence record", `${e.partition} #${e.seq}${e.anchor_id ? ` · anchored ${e.anchor_id}` : " · not yet anchored"}`],
+    ] as [string, string | null][]
+  ).filter(([, v]) => v && v !== " / ");
+  return (
+    <Accordion variant="contained" chevronPosition="left">
+      <Accordion.Item value="tech">
+        <Accordion.Control>
+          <Text size="sm">Technical details</Text>
+        </Accordion.Control>
+        <Accordion.Panel>
+          <Table>
+            <Table.Tbody>
+              {rows.map(([k, v]) => (
+                <Table.Tr key={k}>
+                  <Table.Td c="dimmed" w={170}>
+                    {k}
+                  </Table.Td>
+                  <Table.Td style={{ wordBreak: "break-word" }}>{v}</Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Accordion.Panel>
+      </Accordion.Item>
+    </Accordion>
   );
 }

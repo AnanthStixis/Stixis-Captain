@@ -30,6 +30,8 @@ variables by the client's secret store; they are never in code or config files.
 | CAPTAIN_JUDGE_MODEL / _KEY        |          | judge model name (required with the URL) / key  |
 | CAPTAIN_EVAL_RUBRIC               |          | rubric file (policies/evaluation/rubric.json)    |
 | CAPTAIN_EVAL_SAMPLE_RATE          |          | share of Tier 1-2 calls judged, default 0.05    |
+| CAPTAIN_SECRETS_KEY               |          | AI keys entered on screen: hex:<64 hex> (dev) or |
+|                                   |          | azurekv:<Key Vault RSA key URL>; unset = off     |
 | CAPTAIN_EVAL_RATES                |          | JSON {"<register_id>": rate} per-entry overrides|
 """
 
@@ -40,7 +42,7 @@ import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from sqlalchemy import create_engine
 
@@ -58,6 +60,7 @@ from captain.core.ledger.worm_cloud import AzureImmutableBlobWormStore, S3Object
 from captain.core.models import ApprovalTicket, GovernanceRequest
 from captain.core.policy.opa import OpaPolicyEngine
 from captain.core.registry.service import RegistryService
+from captain.core.secrets_store import SecretsService, build_wrapper
 from captain.core.servicenow import ServiceNowNotifier
 from captain.db.bus import PostgresBus
 from captain.db.registry_store import PgRegistryStore
@@ -72,6 +75,7 @@ from captain.db.stores import (
     PgKillSwitchStore,
     PgLedgerStore,
     PgRegisterStore,
+    PgSecretStore,
     PgSubjectStore,
     PgWorkloadBindings,
     load_price_catalog,
@@ -114,6 +118,7 @@ class Settings:
     eval_rubric: Path = DEFAULT_RUBRIC
     eval_sample_rate: float = DEFAULT_SAMPLE_RATE
     eval_rates: dict[str, float] = field(default_factory=dict)
+    secrets_key: str | None = None  # CAPTAIN_SECRETS_KEY
 
 
 def _csv(v: str | None) -> tuple[str, ...]:
@@ -189,6 +194,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             if env.get(f"CAPTAIN_SERVICENOW_{k}")
         },
         **_eval_settings(env),
+        secrets_key=env.get("CAPTAIN_SECRETS_KEY") or None,
     )
 
 
@@ -348,3 +354,14 @@ def escalation_approvers_from_env() -> Callable[[ApprovalTicket], tuple[str, ...
         return backup
 
     return resolve
+
+
+def build_secrets(s: Settings, engine: Any) -> SecretsService | None:
+    """Company AI keys stored encrypted in Captain (plan step 3); None when not configured."""
+    if not s.secrets_key:
+        return None
+    try:
+        wrapper = build_wrapper(s.secrets_key)
+    except ValueError as e:
+        raise ConfigError(f"CAPTAIN_SECRETS_KEY: {e}") from e
+    return SecretsService(PgSecretStore(engine), wrapper)

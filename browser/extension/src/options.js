@@ -2,6 +2,15 @@ const $ = (id) => document.getElementById(id);
 
 chrome.storage.local.get(["captainUrl", "captainKey", "failMode"]).then((v) => {
   $("url").value = v.captainUrl || "";
+  if (!v.captainUrl) {
+    // Pre-fill the address from a package downloaded from the Captain dashboard.
+    fetch(chrome.runtime.getURL("preset.json"))
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((p) => {
+        if (p.captainUrl && !$("url").value) $("url").value = p.captainUrl;
+      })
+      .catch(() => {});
+  }
   $("key").value = v.captainKey || "";
   $("fail").value = v.failMode || "closed";
 });

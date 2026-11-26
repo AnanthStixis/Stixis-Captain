@@ -1,4 +1,4 @@
-import { Alert, Button, Code, Group, List, NumberInput, Paper, ScrollArea, Select, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
+import { Alert, Button, Group, List, NumberInput, Paper, ScrollArea, Select, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
 import { IconDownload, IconShieldCheck } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -7,6 +7,7 @@ import { api, download, type EventItem } from "../api";
 import { can, useMe } from "../App";
 import { notifyError, PageHeader, QueryState } from "../components/common";
 import { when } from "../format";
+import { OutcomeBadge, TechnicalDetails } from "./Events";
 
 interface Verify {
   ok: boolean;
@@ -111,34 +112,35 @@ export function AuditPage() {
       </SimpleGrid>
 
       <Title order={4} mb="sm">
-        Administrative changes (last 30 days)
+        Who changed what (last 30 days)
       </Title>
-      <QueryState isLoading={admin.isLoading} error={admin.error} empty={admin.data?.items.length === 0} emptyText="No administrative changes.">
+      <QueryState isLoading={admin.isLoading} error={admin.error} empty={admin.data?.items.length === 0} emptyText="No settings were changed in the last 30 days.">
         <ScrollArea>
           <Table striped miw={800}>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>When</Table.Th>
-                <Table.Th>Change</Table.Th>
-                <Table.Th>By</Table.Th>
-                <Table.Th>Details</Table.Th>
+                <Table.Th>Who</Table.Th>
+                <Table.Th>What changed</Table.Th>
+                <Table.Th>Type</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {admin.data?.items.map((e) => (
                 <Table.Tr key={e.event_id}>
-                  <Table.Td>{when(e.recorded_at)}</Table.Td>
+                  <Table.Td miw={150}>{when(e.recorded_at)}</Table.Td>
+                  <Table.Td>{e.who}</Table.Td>
                   <Table.Td>
-                    <Code>{e.event_type}</Code>
+                    <Text size="sm">{e.headline}</Text>
+                    {e.why && (
+                      <Text size="xs" c="dimmed">
+                        Reason given: {e.why}
+                      </Text>
+                    )}
+                    <TechnicalDetails e={e} />
                   </Table.Td>
-                  <Table.Td>{e.principal_id}</Table.Td>
                   <Table.Td>
-                    <Text size="xs">
-                      {Object.entries(e.details ?? {})
-                        .filter(([, v]) => v !== null && v !== "")
-                        .map(([k, v]) => `${k}: ${String(v)}`)
-                        .join(" · ")}
-                    </Text>
+                    <OutcomeBadge e={e} />
                   </Table.Td>
                 </Table.Tr>
               ))}

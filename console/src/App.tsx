@@ -11,8 +11,13 @@ import {
   IconChecklist,
   IconEye,
   IconUsers,
+  IconUserCog,
+  IconListCheck,
   IconGauge,
   IconKey,
+  IconLock,
+  IconBuildingSkyscraper,
+  IconPlugConnected,
   IconLogout,
   IconPower,
   IconScale,
@@ -20,16 +25,19 @@ import {
   type Icon,
 } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
-import { api, ApiError, getToken, setCsrf, setToken, type AuthConfig, type Me, type SessionInfo } from "./api";
+import { api, ApiError, getToken, redeemInvite, setCsrf, setToken, type AuthConfig, type Me, type SessionInfo } from "./api";
 import { notifyError } from "./components/common";
 import { AlertsPage } from "./pages/Alerts";
 import { ApprovalsPage } from "./pages/Approvals";
 import { AuditPage } from "./pages/Audit";
 import { BudgetsPage } from "./pages/Budgets";
 import { EventsPage } from "./pages/Events";
+import { AiKeysPage } from "./pages/AiKeys";
+import { CompaniesPage } from "./pages/Companies";
+import { ConnectToolsPage } from "./pages/ConnectTools";
 import { KeysPage } from "./pages/Keys";
 import { KillSwitchPage } from "./pages/KillSwitch";
 import { AgentsPage } from "./pages/Agents";
@@ -39,7 +47,9 @@ import { PolicyPage } from "./pages/Policy";
 import { OverviewPage } from "./pages/Overview";
 import { RegisterPage } from "./pages/Register";
 import { RegistryPage } from "./pages/Registry";
+import { SetupPage } from "./pages/Setup";
 import { UsageBreakdownPage } from "./pages/UsageBreakdown";
+import { UsersPage } from "./pages/Users";
 
 interface NavItem {
   path: string;
@@ -58,14 +68,58 @@ export const NAV: NavItem[] = [
   { path: "/observed", label: "Observed usage", icon: IconEye, needs: "usage:read", element: <ObservedPage /> },
   { path: "/approvals", label: "Approvals", icon: IconChecklist, needs: "approval:decide", element: <ApprovalsPage /> },
   { path: "/budgets", label: "Budgets", icon: IconCash, needs: "budget:read", element: <BudgetsPage /> },
-  { path: "/keys", label: "Keys", icon: IconKey, needs: "keys:read", element: <KeysPage /> },
+  { path: "/keys", label: "Captain keys", icon: IconKey, needs: "keys:read", element: <KeysPage /> },
+  { path: "/ai-keys", label: "AI keys", icon: IconLock, needs: "register:read", element: <AiKeysPage /> },
+  { path: "/connect", label: "Connect your tools", icon: IconPlugConnected, needs: "register:read", element: <ConnectToolsPage /> },
+  { path: "/companies", label: "Companies (Stixis)", icon: IconBuildingSkyscraper, needs: "companies:write", element: <CompaniesPage /> },
   { path: "/register", label: "AI Register", icon: IconBook2, needs: "register:read", element: <RegisterPage /> },
   { path: "/registry", label: "Models & tools", icon: IconBox, needs: "register:read", element: <RegistryPage /> },
   { path: "/policy", label: "Policy", icon: IconScale, needs: "usage:read", element: <PolicyPage /> },
   { path: "/killswitch", label: "Kill switch", icon: IconPower, needs: "usage:read", element: <KillSwitchPage /> },
   { path: "/alerts", label: "Alerts", icon: IconAlertTriangle, needs: "usage:read", element: <AlertsPage /> },
   { path: "/audit", label: "Audit & reports", icon: IconShieldCheck, needs: "audit:read", element: <AuditPage /> },
+  { path: "/users", label: "Users", icon: IconUserCog, needs: "keys:read", element: <UsersPage /> },
+  { path: "/setup", label: "Setup", icon: IconListCheck, needs: "org:write", element: <SetupPage /> },
 ];
+
+/** /accept-invite#token=…: a one-time org-admin invite. The token travels in the URL
+ * fragment, so it never reaches server logs; it is posted once and removed from the URL. */
+function AcceptInvite({ onDone }: { onDone: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const started = useRef(false);
+  const nav = useNavigate();
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    const token = new URLSearchParams(window.location.hash.slice(1)).get("token") ?? "";
+    window.history.replaceState({}, "", "/accept-invite");
+    redeemInvite(token)
+      .then(() => {
+        nav("/setup", { replace: true });
+        onDone();
+      })
+      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : "This invite link could not be used."));
+  }, [nav, onDone]);
+  return (
+    <Center mih="100vh">
+      {error ? (
+        <Paper withBorder p="xl" w={460} maw="94vw">
+          <Stack>
+            <Title order={3}>Invite link not accepted</Title>
+            <Alert color="red" icon={<IconAlertTriangle size={16} />} role="alert">
+              {error}
+            </Alert>
+            <Button component="a" href="/" variant="default">
+              Go to sign-in
+            </Button>
+          </Stack>
+        </Paper>
+      ) : (
+        <Loader aria-label="Signing you in" />
+      )}
+    </Center>
+  );
+}
 
 export function useMe() {
   return useQuery({
@@ -175,6 +229,8 @@ export function App() {
   const nav = useNavigate();
   const loc = useLocation();
 
+  if (loc.pathname === "/accept-invite")
+    return <AcceptInvite onDone={() => void qc.invalidateQueries({ queryKey: ["me"] })} />;
   if (me.error instanceof ApiError && me.error.status === 401)
     return <Login onSignedIn={() => void qc.invalidateQueries({ queryKey: ["me"] })} />;
   if (me.isLoading || !me.data)

@@ -36,8 +36,10 @@ from captain.api.admin_auth import (
 from captain.api.admin_http import create_admin_app
 from captain.api.admin_queries import PgAdminQueries
 from captain.api.admin_sso import OidcClient, SsoClientConfig, SsoService
+from captain.api.controlplane import PgCompanyStore
+from captain.api.org import INVITE_TTL_S, InviteService, PgOrganizationStore
 from captain.api.state import PgStateStore
-from captain.config import ConfigError, build_from_env
+from captain.config import ConfigError, build_from_env, build_secrets
 from captain.core.identity.oidc import HttpJwks, IssuerConfig
 from captain.envfile import DEFAULT_ENV_FILE, dotenv_values
 
@@ -59,6 +61,19 @@ class _DiscoveredJwks:
             )
             self._inner = HttpJwks({issuer: cfg})
         return self._inner.key(issuer, kid)
+
+
+def _user_lookup(built: Any) -> Any:
+    """Console roles on the person's Captain user record (matched by email)."""
+    ids = built.infra.identity_store
+
+    def lookup(email: str) -> tuple[bool, frozenset[str]] | None:
+        p = ids.get_principal(email)
+        if p is None or str(p.type) != "USER":
+            return None
+        return p.active, p.roles
+
+    return lookup
 
 
 def create_admin_app_from_env() -> FastAPI:
@@ -91,6 +106,7 @@ def create_admin_app_from_env() -> FastAPI:
             roles_claim=client_cfg.roles_claim,
             name_claim=client_cfg.name_claim,
             group_roles={g: tuple(r) for g, r in c.get("group_roles", {}).items()},
+            user_lookup=_user_lookup(built),
         )
         extra = tuple(
             o.strip()
@@ -106,7 +122,13 @@ def create_admin_app_from_env() -> FastAPI:
 
     dev_token = env.get("CAPTAIN_DEV_ADMIN_TOKEN")
     if dev_token:
-        auths.append(DevTokenAuthenticator(dev_token))
+        # On the Stixis install the dev token may also manage client companies.
+        cp = (
+            frozenset({"platform-admin"})
+            if env.get("CAPTAIN_CONTROL_PLANE") == "1"
+            else frozenset()
+        )
+        auths.append(DevTokenAuthenticator(dev_token, extra_roles=cp))
     if not auths:
         raise ConfigError(
             "configure CAPTAIN_ADMIN_OIDC (SSO) or CAPTAIN_DEV_ADMIN_TOKEN (dev only)"
@@ -124,4 +146,12 @@ def create_admin_app_from_env() -> FastAPI:
         CONSOLE_DIST,
         sso=sso,
         dev_token_enabled=bool(dev_token),
+        org_store=PgOrganizationStore(engine),
+        ai_keys=build_secrets(settings, engine),
+        companies=PgCompanyStore(engine) if env.get("CAPTAIN_CONTROL_PLANE") == "1" else None,
+        invites=InviteService(
+            PgStateStore(engine, ttl_s=INVITE_TTL_S),
+            sso_enabled=lambda: sso is not None,
+            secure_cookies=sso is not None and sso.cfg.secure_cookies,
+        ),
     )

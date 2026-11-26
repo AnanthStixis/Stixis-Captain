@@ -69,7 +69,7 @@ def pg(pg_engine: Engine) -> Engine:
             "TRUNCATE evidence_ledger, ledger_outbox, ledger_anchor_ranges, approval_tickets, "
             "budget_reservations, budget_buckets, rate_windows, budget_definitions, rate_limits, "
             "kill_switches, workload_bindings, virtual_keys, principals, applications, projects, "
-            "register_entries, "
+            "register_entries, organization, provider_secrets, cp_companies, "
             "model_prices, alerts, registry_items, budget_alert_marks, api_state, subject_keys"
         ))  # fmt: skip
         c.execute(text("ALTER TABLE evidence_ledger ENABLE TRIGGER USER"))

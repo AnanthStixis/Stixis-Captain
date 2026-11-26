@@ -28,6 +28,11 @@ output "captain_ledger_key" {
   value       = "azurekv:${azurerm_key_vault_key.ledger.id}"
 }
 
+output "captain_secrets_key" {
+  description = "Helm env CAPTAIN_SECRETS_KEY (company AI keys entered on the dashboard)"
+  value       = "azurekv:${azurerm_key_vault_key.secrets.id}"
+}
+
 output "captain_worm" {
   description = "Helm env CAPTAIN_WORM"
   value       = "azure:${azurerm_storage_account.anchors.primary_blob_endpoint}|${azurerm_storage_container.anchors.name}"
@@ -60,6 +65,7 @@ output "helm_values" {
       CAPTAIN_LEDGER_KEY          = "azurekv:${azurerm_key_vault_key.ledger.id}"
       CAPTAIN_WORM                = "azure:${azurerm_storage_account.anchors.primary_blob_endpoint}|${azurerm_storage_container.anchors.name}"
       CAPTAIN_WORM_RETENTION_DAYS = tostring(var.anchor_retention_days)
+      CAPTAIN_SECRETS_KEY         = "azurekv:${azurerm_key_vault_key.secrets.id}"
     }
     networkPolicy = { databaseCidr = azurerm_subnet.postgres.address_prefixes[0] }
   })

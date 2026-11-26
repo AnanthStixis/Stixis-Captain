@@ -30,7 +30,7 @@ IP_DAY = "ipday:"
 # Ledger body detail keys that may carry a person id, a list of them, or budget scopes.
 _PERSON_KEYS = frozenset(
     {"actor", "actor_id", "approver", "principal", "principal_id", "requester", "by",
-     "user", "owner_id", "decided_by", "requested_by"}
+     "user", "owner_id", "decided_by", "requested_by", "email"}
 )  # fmt: skip
 _PERSON_LIST_KEYS = frozenset({"approvers", "recipients"})
 _SCOPE_KEYS = frozenset({"scope", "scopes"})

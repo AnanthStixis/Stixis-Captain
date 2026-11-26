@@ -17,10 +17,16 @@ from fastapi import FastAPI
 from sqlalchemy import create_engine
 
 from captain.api.state import PgStateStore
-from captain.config import build_from_env
+from captain.config import build_from_env, build_secrets
 from captain.envfile import DEFAULT_ENV_FILE, dotenv_values
 from captain.integrations.api_gateway.app import create_gateway_app
-from captain.integrations.api_gateway.provider import EnvSecretResolver, OpenAICompatibleClient
+from captain.integrations.api_gateway.provider import (
+    ChainSecretResolver,
+    EnvSecretResolver,
+    OpenAICompatibleClient,
+    SecretResolver,
+    StoredSecretResolver,
+)
 
 
 def create_gateway_app_from_env() -> FastAPI:
@@ -36,10 +42,17 @@ def create_gateway_app_from_env() -> FastAPI:
     return create_gateway_app(
         built.core,
         # Real environment wins over backend/.env (development convenience only).
-        OpenAICompatibleClient(
-            EnvSecretResolver({**dotenv_values(DEFAULT_ENV_FILE), **os.environ})
-        ),
+        OpenAICompatibleClient(secret_resolver(env, build_secrets(settings, engine))),
         PgStateStore(engine, ttl_s=24 * 3600),
         captain_hosts=hosts,
         desktop_actors=actors,
     )
+
+
+def secret_resolver(env: dict[str, str], secrets: object | None) -> SecretResolver:
+    """`env:NAME` from the environment (real env wins over backend/.env); `captain:<id>`
+    from the AI keys stored encrypted in Captain, when that is switched on."""
+    by_kind: dict[str, SecretResolver] = {"env": EnvSecretResolver(env)}
+    if secrets is not None:
+        by_kind["captain"] = StoredSecretResolver(secrets)
+    return ChainSecretResolver(by_kind)
