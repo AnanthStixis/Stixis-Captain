@@ -103,3 +103,12 @@ suite("fetchContinueConfig", () => {
     expect(await fetchContinueConfig(fake(200, ""), "http://evil.example", "k")).toMatchObject({ ok: false });
   });
 });
+
+suite("plain http on a test network", () => {
+  it("refused by default, allowed only when the setting is on", () => {
+    expect(checkGatewayUrl("http://abc.10.0.0.16.nip.io").ok).toBe(false);
+    expect(checkGatewayUrl("http://abc.10.0.0.16.nip.io", true)).toEqual({ ok: true, base: "http://abc.10.0.0.16.nip.io" });
+    expect(checkGatewayUrl("http://user:pw@abc.example", true).ok).toBe(false); // never credentials
+    expect(checkGatewayUrl("ftp://abc.example", true).ok).toBe(false);
+  });
+});

@@ -6,17 +6,38 @@
   "publisher": "stixis",
   "private": true,
   "license": "UNLICENSED",
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Other"],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
   "main": "./dist/extension.js",
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "commands": [
-      { "command": "captain.setKey", "title": "Captain: Set Key" },
-      { "command": "captain.clearKey", "title": "Captain: Clear Key" },
-      { "command": "captain.refresh", "title": "Captain: Refresh Status" },
-      { "command": "captain.showStatus", "title": "Captain: Show Status" },
-      { "command": "captain.openContinueConfig", "title": "Captain: Open Continue Configuration" }
+      {
+        "command": "captain.setKey",
+        "title": "Captain: Set Key"
+      },
+      {
+        "command": "captain.clearKey",
+        "title": "Captain: Clear Key"
+      },
+      {
+        "command": "captain.refresh",
+        "title": "Captain: Refresh Status"
+      },
+      {
+        "command": "captain.showStatus",
+        "title": "Captain: Show Status"
+      },
+      {
+        "command": "captain.openContinueConfig",
+        "title": "Captain: Open Continue Configuration"
+      }
     ],
     "configuration": {
       "title": "Stixis Captain",
@@ -25,6 +46,11 @@
           "type": "string",
           "default": "http://127.0.0.1:8000",
           "markdownDescription": "Base URL of the Captain API Gateway (no `/v1`). Use https except for a gateway on this machine."
+        },
+        "captain.allowPlainHttp": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Test networks only.** Allow plain `http://` to a gateway on another machine. Your Captain key is then sent unencrypted: never turn this on outside a closed QA network."
         }
       }
     }

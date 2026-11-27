@@ -29,8 +29,9 @@ export type FetchLike = (url: string, init: { headers: Record<string, string>; s
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-/** The key is a bearer secret: never send it over plain http to another machine. */
-export function checkGatewayUrl(raw: string): { ok: true; base: string } | { ok: false; reason: string } {
+/** The key is a bearer secret: never send it over plain http to another machine, unless
+ * `allowPlainHttp` is on (test networks only, setting captain.allowPlainHttp). */
+export function checkGatewayUrl(raw: string, allowPlainHttp = false): { ok: true; base: string } | { ok: false; reason: string } {
   let u: URL;
   try {
     u = new URL(raw);
@@ -38,9 +39,11 @@ export function checkGatewayUrl(raw: string): { ok: true; base: string } | { ok:
     return { ok: false, reason: "The gateway URL is not a valid URL." };
   }
   if (u.username || u.password) return { ok: false, reason: "The gateway URL must not contain credentials." };
-  if (u.protocol === "https:" || (u.protocol === "http:" && LOOPBACK.has(u.hostname))) {
+  if (u.protocol === "https:" || (u.protocol === "http:" && (LOOPBACK.has(u.hostname) || allowPlainHttp))) {
     return { ok: true, base: u.origin + u.pathname.replace(/\/+$/, "") };
   }
+  if (u.protocol === "http:")
+    return { ok: false, reason: "Use https for the gateway. On a test network you may allow plain http with the setting captain.allowPlainHttp." };
   return { ok: false, reason: "Use https for the gateway (plain http is only allowed for this machine)." };
 }
 
@@ -70,9 +73,10 @@ export async function fetchStatus(
   gatewayUrl: string,
   key: string | undefined,
   timeoutMs = 5000,
+  allowPlainHttp = false,
 ): Promise<StatusResult> {
   if (!key) return { kind: "no-key" };
-  const chk = checkGatewayUrl(gatewayUrl);
+  const chk = checkGatewayUrl(gatewayUrl, allowPlainHttp);
   if (!chk.ok) return { kind: "bad-url", reason: chk.reason };
   try {
     const r = await get(f, `${chk.base}/v1/governance/status`, key, timeoutMs);
@@ -91,8 +95,9 @@ export async function fetchContinueConfig(
   gatewayUrl: string,
   key: string,
   timeoutMs = 5000,
+  allowPlainHttp = false,
 ): Promise<{ ok: true; yaml: string } | { ok: false; reason: string }> {
-  const chk = checkGatewayUrl(gatewayUrl);
+  const chk = checkGatewayUrl(gatewayUrl, allowPlainHttp);
   if (!chk.ok) return { ok: false, reason: chk.reason };
   try {
     const r = await get(f, `${chk.base}/v1/ide/continue`, key, timeoutMs);

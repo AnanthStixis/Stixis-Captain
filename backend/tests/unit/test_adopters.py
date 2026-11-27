@@ -30,7 +30,11 @@ def fake_artifacts(root: Path) -> Path:
             "contributes": {
                 "configuration": {
                     "properties": {
-                        "captain.gatewayUrl": {"type": "string", "default": "http://127.0.0.1:8000"}
+                        "captain.gatewayUrl": {
+                            "type": "string",
+                            "default": "http://127.0.0.1:8000",
+                        },
+                        "captain.allowPlainHttp": {"type": "boolean", "default": False},
                     }
                 }
             }
@@ -170,3 +174,19 @@ def test_viewers_without_register_read_are_refused(tmp_path: Path) -> None:
 def test_urls_fill() -> None:
     u = Urls(gateway="g", mcp="m", core="c", console="x")
     assert u.fill("{{GATEWAY_URL}} {{MCP_URL}} {{CORE_URL}} {{CONSOLE_URL}}") == "g m c x"
+
+
+def test_plain_http_is_allowed_only_in_packages_from_a_plain_http_install(tmp_path: Path) -> None:
+    from captain.api.adopters import Urls, vscode_vsix
+
+    art = fake_artifacts(tmp_path)
+
+    def allowed(gateway: str) -> bool:
+        pkg = json.loads(unzip(vscode_vsix(art, Urls(gateway=gateway)))["extension/package.json"])
+        return bool(
+            pkg["contributes"]["configuration"]["properties"]["captain.allowPlainHttp"]["default"]
+        )
+
+    assert allowed("http://glixify.10.0.0.16.nip.io") is True  # QA on a closed network
+    assert allowed("https://abc.stixis.com") is False
+    assert allowed("http://127.0.0.1:8000") is False  # this machine needs no exception

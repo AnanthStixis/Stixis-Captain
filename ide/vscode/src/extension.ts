@@ -14,9 +14,11 @@ export function activate(context: vscode.ExtensionContext): void {
   let last: StatusResult = { kind: "no-key" };
 
   const gateway = () => vscode.workspace.getConfiguration("captain").get<string>("gatewayUrl", "http://127.0.0.1:8000");
+  // Test networks only: lets the key travel over plain http (off by default).
+  const allowHttp = () => vscode.workspace.getConfiguration("captain").get<boolean>("allowPlainHttp", false);
 
   async function refresh(): Promise<void> {
-    last = await fetchStatus(http, gateway(), await context.secrets.get(KEY));
+    last = await fetchStatus(http, gateway(), await context.secrets.get(KEY), 5000, allowHttp());
     const d = describe(last);
     bar.text = `$(shield) ${d.text}`;
     bar.tooltip = d.tooltip;
@@ -53,7 +55,7 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.window.showWarningMessage("Run “Captain: Set Key” first.");
         return;
       }
-      const r = await fetchContinueConfig(http, gateway(), key);
+      const r = await fetchContinueConfig(http, gateway(), key, 5000, allowHttp());
       if (!r.ok) {
         void vscode.window.showErrorMessage(`Captain: ${r.reason}`);
         return;

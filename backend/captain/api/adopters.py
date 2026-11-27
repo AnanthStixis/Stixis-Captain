@@ -150,6 +150,12 @@ def vscode_vsix(artifacts: Path, urls: Urls) -> bytes:
                 pkg = json.loads(data)
                 props = pkg["contributes"]["configuration"]["properties"]
                 props["captain.gatewayUrl"]["default"] = urls.gateway
+                # An install that is itself plain http (a closed QA network): the extension
+                # must be allowed to use it, or it refuses to send the key at all.
+                host = urlsplit(urls.gateway).hostname or ""
+                if urls.gateway.startswith("http://") and host not in ("127.0.0.1", "localhost"):
+                    if "captain.allowPlainHttp" in props:
+                        props["captain.allowPlainHttp"]["default"] = True
                 data = json.dumps(pkg, indent=2).encode()
             z.writestr(item, data)
     return out.getvalue()
