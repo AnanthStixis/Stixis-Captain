@@ -353,6 +353,7 @@ def create_admin_app(
     static_dir: Path | None = None,
     sso: SsoService | None = None,
     dev_token_enabled: bool = False,
+    admin_key_enabled: bool = False,
     org_store: OrganizationStore | None = None,
     invites: InviteService | None = None,
     signin_mailer: "SignInMailer | None" = None,
@@ -471,6 +472,7 @@ def create_admin_app(
         return {
             "sso": live.get() is not None,
             "dev_token": dev_token_enabled,
+            "admin_key": admin_key_enabled,
             "stixis_console": companies is not None,
             # Companies without SSO: people get a one-time sign-in link by email.
             "email_link": live.get() is None

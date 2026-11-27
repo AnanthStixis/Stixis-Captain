@@ -130,6 +130,26 @@ class DevTokenAuthenticator:
         return self._actor
 
 
+class AdminKeyAuthenticator:
+    """The Stixis super admin's sign-in key (CAPTAIN_PLATFORM_ADMIN_KEY): accepted from any
+    address, on the Stixis console only. For installs without SSO yet (QA); keep it long and
+    secret, and remove it once SSO is set up."""
+
+    def __init__(self, key: str) -> None:
+        if len(key) < 32:
+            raise ValueError("CAPTAIN_PLATFORM_ADMIN_KEY must be at least 32 characters")
+        self._key = key
+        self._actor = AdminActor(
+            "stixis-admin-key", frozenset({"admin", "approver", "auditor", "platform-admin"})
+        )
+        log.warning("Stixis admin key sign-in is ENABLED")
+
+    def authenticate(self, token: str, client_host: str | None) -> AdminActor:
+        if not hmac.compare_digest(token.encode(), self._key.encode()):
+            raise AuthenticationError("invalid admin key")
+        return self._actor
+
+
 class ChainAuthenticator:
     """Try SSO first, then the dev token (if configured)."""
 

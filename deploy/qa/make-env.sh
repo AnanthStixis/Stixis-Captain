@@ -35,6 +35,8 @@ CAPTAIN_PUBLIC_SCHEME=$SCHEME
 CAPTAIN_KEY_PEPPER=$(hex 32)
 CAPTAIN_SECRETS_KEY=hex:$(hex 32)
 CAPTAIN_SESSION_SECRET=$(hex 32)
+# Stixis super admin sign-in key (Stixis console only). Remove once SSO is set up.
+CAPTAIN_PLATFORM_ADMIN_KEY=$(hex 32)
 
 # Fair share between companies (per gateway copy) and database connections per company.
 CAPTAIN_TENANT_RPM=600

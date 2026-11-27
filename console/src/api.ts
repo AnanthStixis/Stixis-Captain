@@ -128,6 +128,7 @@ export interface SessionInfo extends Me {
 export interface AuthConfig {
   sso: boolean;
   dev_token: boolean;
+  admin_key?: boolean;
   stixis_console?: boolean;
   email_link?: boolean;
 }

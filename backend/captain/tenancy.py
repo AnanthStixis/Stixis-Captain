@@ -142,6 +142,10 @@ class Tenancy:
             "CAPTAIN_CONSOLE_ORIGINS": url,
             "CAPTAIN_CONTROL_PLANE": "1" if code == PLATFORM else "",
             "CAPTAIN_PLATFORM_TOKEN": "",
+            # The Stixis admin key signs in to the Stixis console only, never a company's.
+            "CAPTAIN_PLATFORM_ADMIN_KEY": (
+                self.env.get("CAPTAIN_PLATFORM_ADMIN_KEY", "") if code == PLATFORM else ""
+            ),
             "CAPTAIN_TENANT": code,
         }
         o.pop("CAPTAIN_WORM", None)

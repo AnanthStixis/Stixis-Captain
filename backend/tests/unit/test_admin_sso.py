@@ -321,6 +321,7 @@ def test_auth_config_and_security_headers(env: Env) -> None:
     assert r.json() == {
         "sso": True,
         "dev_token": True,
+        "admin_key": False,
         "stixis_console": False,
         "email_link": False,
     }

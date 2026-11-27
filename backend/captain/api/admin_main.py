@@ -29,6 +29,7 @@ from captain.api.admin_auth import (
     AdminAuthenticator,
     AdminSsoConfig,
     ChainAuthenticator,
+    AdminKeyAuthenticator,
     DevTokenAuthenticator,
     OidcAdminAuthenticator,
 )
@@ -167,6 +168,11 @@ def create_admin_app_from_env() -> FastAPI:
             else frozenset()
         )
         auths.append(DevTokenAuthenticator(dev_token, extra_roles=cp))
+    admin_key = env.get("CAPTAIN_PLATFORM_ADMIN_KEY")
+    if admin_key and env.get("CAPTAIN_CONTROL_PLANE") == "1":
+        auths.append(AdminKeyAuthenticator(admin_key))
+    else:
+        admin_key = None
     if not auths:
         raise ConfigError(
             "configure CAPTAIN_ADMIN_OIDC (SSO) or CAPTAIN_DEV_ADMIN_TOKEN (dev only)"
@@ -184,6 +190,7 @@ def create_admin_app_from_env() -> FastAPI:
         CONSOLE_DIST,
         sso=sso,
         dev_token_enabled=bool(dev_token),
+        admin_key_enabled=bool(admin_key),
         org_store=PgOrganizationStore(engine),
         ai_keys=secrets_svc,
         live_sso=live,

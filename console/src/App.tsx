@@ -462,9 +462,12 @@ function Login({ onSignedIn }: { onSignedIn: () => void }) {
                   Sign in with SSO
                 </Button>
               )}
-              {cfg.data?.dev_token && (
+              {(cfg.data?.dev_token || cfg.data?.admin_key) && (
                 <>
-                  <Divider label="development only" labelPosition="center" />
+                  <Divider
+                    label={cfg.data?.admin_key ? "Stixis admin key" : "development only"}
+                    labelPosition="center"
+                  />
                   <form
                     onSubmit={async (e) => {
                       e.preventDefault();
@@ -483,8 +486,12 @@ function Login({ onSignedIn }: { onSignedIn: () => void }) {
                   >
                     <Stack>
                       <PasswordInput
-                        label="Dev admin token"
-                        description="Accepted from this machine only"
+                        label={cfg.data?.admin_key ? "Admin key" : "Dev admin token"}
+                        description={
+                          cfg.data?.admin_key
+                            ? "The Stixis super admin key (CAPTAIN_PLATFORM_ADMIN_KEY)"
+                            : "Accepted from this machine only"
+                        }
                         value={token}
                         onChange={(e) => setTok(e.currentTarget.value)}
                         required
@@ -504,6 +511,7 @@ function Login({ onSignedIn }: { onSignedIn: () => void }) {
               {cfg.data &&
                 !cfg.data.sso &&
                 !cfg.data.dev_token &&
+                !cfg.data.admin_key &&
                 !cfg.data.email_link && (
                   <Text c="red">
                     No sign-in method is configured on the server.
