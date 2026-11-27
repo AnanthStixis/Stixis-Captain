@@ -302,6 +302,7 @@ class PgBudgetCatalog:
                 stmt.on_conflict_do_update(
                     constraint="uq_budget_definitions_scope",
                     set_={
+                        "period": stmt.excluded.period,
                         "limit_micros": stmt.excluded.limit_micros,
                         "hard": stmt.excluded.hard,
                         "alert_thresholds": stmt.excluded.alert_thresholds,
@@ -330,6 +331,14 @@ class PgBudgetCatalog:
     def remove_rate(self, scope: str) -> bool:
         with self._e.begin() as c:
             res = c.execute(delete(s.rate_limits).where(s.rate_limits.c.scope == scope))
+            return bool(res.rowcount)
+
+    def remove(self, scope: str) -> bool:
+        """The definition only: spend already recorded stays in the evidence ledger."""
+        with self._e.begin() as c:
+            res = c.execute(
+                delete(s.budget_definitions).where(s.budget_definitions.c.scope == scope)
+            )
             return bool(res.rowcount)
 
     def budgets_for(self, scopes: tuple[str, ...]) -> list[BudgetDefinition]:

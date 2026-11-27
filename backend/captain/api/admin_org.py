@@ -256,6 +256,13 @@ def install_org_routes(
                 raise ValueError("you cannot deactivate yourself")
             if Permission.USERS_WRITE not in permissions_for(roles):
                 raise ValueError("you cannot remove your own user management")
+        if old.active and body.active is False:
+            from captain.api.admin_deletes import user_admins, user_check
+
+            blockers = user_check(queries, old.id, user_admins(queries))["blockers"]
+            if blockers:
+                raise HTTPException(409, {"error": "IN_USE", "blockers": blockers,
+                                          "message": "; ".join(blockers)})  # fmt: skip
         new = PrincipalRecord(
             id=old.id,
             type=old.type,

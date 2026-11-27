@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from captain.api.admin_aikeys import install_aikey_routes
+from captain.api.admin_deletes import install_delete_routes
 from captain.api.admin_queries import InMemoryAdminQueries
 from captain.core.admin import AdminActor, AdminService
 from captain.core.identity.rbac import PermissionDenied
@@ -105,8 +106,10 @@ def rig(
 
     def provider(req: httpx.Request) -> httpx.Response:
         seen.append(req)
-        ok = req.headers.get("authorization") == f"Bearer {KEY}"
-        return httpx.Response(200 if ok else 401, json={"data": []})
+        ok = req.headers.get("authorization", "").startswith(f"Bearer {KEY}")
+        models = [{"id": "gpt-4o-mini-2024-07-18"}, {"id": "text-embedding-3-small"},
+                  {"id": "my-finetune"}]  # fmt: skip
+        return httpx.Response(200 if ok else 401, json={"data": models})
 
     app = FastAPI()
 
@@ -120,6 +123,8 @@ def rig(
         lambda: AdminActor("priya@corp.example", roles), s,
         httpx.Client(transport=httpx.MockTransport(provider)),
     )  # fmt: skip
+    install_delete_routes(app, h.built, admin, InMemoryAdminQueries(h.built.infra),
+                          lambda: AdminActor("priya@corp.example", roles))  # fmt: skip
     return h, TestClient(app), s, seen
 
 
@@ -225,3 +230,63 @@ def test_gateway_calls_the_provider_with_the_stored_key() -> None:
         resolver.secret(f"captain:{stored.id}")
     with pytest.raises(ProviderError):
         resolver.secret("vault:other")
+
+
+def test_a_rejected_key_is_never_saved() -> None:
+    h, c, _, _ = rig()
+    wrong = {"provider_id": "oa", "kind": "openai", "key": "sk-wrong-key-123"}
+    r = c.post("/admin/v1/ai-keys", json=wrong)
+    assert r.status_code == 400 and "rejected" in r.text
+    assert h.core.m.registry.provider("oa") is None  # type: ignore[union-attr]
+
+
+def test_models_are_listed_live_with_suggested_prices() -> None:
+    _, c, _, _ = rig()
+    c.post("/admin/v1/ai-keys", json={"provider_id": "oa", "kind": "openai", "key": KEY})
+    got = {m["id"]: m for m in c.get("/admin/v1/ai-keys/oa/models").json()["models"]}
+    assert set(got) == {"gpt-4o-mini-2024-07-18", "my-finetune"}  # no embeddings
+    price = got["gpt-4o-mini-2024-07-18"]["suggested_price"]
+    assert (price["input_usd_per_m"], price["output_usd_per_m"]) == (0.15, 0.60)
+    assert price["source"]  # the feed (offline in the test) or the built-in list
+    assert got["my-finetune"]["suggested_price"] is None
+
+
+def test_price_feed_is_used_first_and_cached() -> None:
+    from captain.core.usage.list_prices import FEED_SOURCE, PriceFeed
+
+    calls = []
+
+    def feed(req: httpx.Request) -> httpx.Response:
+        calls.append(req)
+        return httpx.Response(200, json={
+            "gpt-4o-mini": {"input_cost_per_token": 2e-07, "output_cost_per_token": 8e-07},
+            "gemini/gemini-2.5-flash": {"input_cost_per_token": 3e-07,
+                                         "output_cost_per_token": 2.5e-06}})  # fmt: skip
+
+    f = PriceFeed(httpx.Client(transport=httpx.MockTransport(feed)), "https://feed.example/p.json")
+    assert f.price("openai", "gpt-4o-mini") == ((0.2, 0.8), FEED_SOURCE)
+    assert f.price("gemini", "models/gemini-2.5-flash") == ((0.3, 2.5), FEED_SOURCE)
+    assert f.price("openai", "gpt-4.1")[1] != FEED_SOURCE  # built-in fallback
+    assert f.price("openai", "my-finetune") is None
+    assert len(calls) == 1
+
+
+def test_a_key_in_use_cannot_be_removed_until_its_models_are_switched_off() -> None:
+    from captain.core.registry.service import ModelEntry
+
+    h, c, _, _ = rig()
+    c.post("/admin/v1/ai-keys", json={"provider_id": "oa", "kind": "openai", "key": KEY})
+    reg = h.core.m.registry
+    reg.upsert_model(ModelEntry("gpt-4o-mini", "oa", "gpt-4o-mini", "external"))  # type: ignore[union-attr]
+
+    check = c.get("/admin/v1/ai-keys/oa/delete-check").json()
+    assert check["can_delete"] is False and "gpt-4o-mini" in check["blockers"][0]
+    r = c.delete("/admin/v1/ai-keys/oa")
+    assert r.status_code == 409 and "gpt-4o-mini" in r.text
+
+    assert c.get("/admin/v1/registry/model/gpt-4o-mini/delete-check").json()["can_delete"]
+    assert c.delete("/admin/v1/registry/model/gpt-4o-mini").json()["status"] == "switched_off"
+    m = reg.model("gpt-4o-mini")  # type: ignore[union-attr]
+    assert m is not None and m.active is False  # soft: still there, switched off
+    assert c.delete("/admin/v1/ai-keys/oa").json()["status"] == "removed"
+    assert c.delete("/admin/v1/registry/model/nope").status_code == 404

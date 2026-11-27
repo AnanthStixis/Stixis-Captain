@@ -30,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from captain.api.admin_adopters import install_adopter_routes
 from captain.api.admin_aikeys import install_aikey_routes
 from captain.api.admin_auth import AdminAuthenticator
+from captain.api.admin_deletes import install_delete_routes
 from captain.api.admin_org import install_org_routes
 from captain.api.admin_platform import install_platform_routes
 from captain.api.admin_queries import (
@@ -503,6 +504,7 @@ def create_admin_app(
         install_controlplane_routes(app, built, actor, companies, ai_keys, http=company_http,
                                     queries=queries, provision=provision)  # fmt: skip
     install_aikey_routes(app, built, admin, queries, actor, ai_keys)
+    install_delete_routes(app, built, admin, queries, actor)
     install_adopter_routes(app, queries, actor)
 
     # ------------------------------------------------------------------- me

@@ -6,6 +6,8 @@ import { useState } from "react";
 import { api } from "../api";
 import { can, useMe } from "../App";
 import { notifyError, notifyOk, PageHeader, QueryState } from "../components/common";
+import { ProviderModelsModal } from "../components/ProviderModels";
+import { SafeDeleteModal } from "../components/SafeDelete";
 import { when } from "../format";
 
 interface StoredKey {
@@ -48,6 +50,8 @@ export function AiKeysPage() {
   const q = useQuery({ queryKey: ["ai-keys"], queryFn: () => api.get<AiKeysResponse>("/ai-keys") });
   const [editing, setEditing] = useState<{ provider_id: string; kind: string; base_url: string } | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
+  const [picking, setPicking] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const refresh = () => qc.invalidateQueries({ queryKey: ["ai-keys"] });
 
   return (
@@ -139,6 +143,11 @@ export function AiKeysPage() {
                           Test
                         </Button>
                       )}
+                      {p.key_source === "captain" && (
+                        <Button size="xs" variant="default" onClick={() => setPicking(p.provider_id)}>
+                          Models
+                        </Button>
+                      )}
                       <Button size="xs" variant="default" onClick={() => setEditing({ provider_id: p.provider_id, kind: p.kind, base_url: p.base_url ?? "" })}>
                         {p.key_source === "captain" ? "Replace" : "Add key"}
                       </Button>
@@ -147,18 +156,9 @@ export function AiKeysPage() {
                           size="xs"
                           color="red"
                           variant="light"
-                          onClick={async () => {
-                            if (!window.confirm(`Remove the AI key for ${p.provider_id}? AI calls through this provider will stop until a new key is added.`)) return;
-                            try {
-                              await api.del(`/ai-keys/${encodeURIComponent(p.provider_id)}`);
-                              notifyOk("Key removed");
-                              await refresh();
-                            } catch (e) {
-                              notifyError(e);
-                            }
-                          }}
+                          onClick={() => setDeleting(p.provider_id)}
                         >
-                          Remove
+                          Delete
                         </Button>
                       )}
                     </Group>
@@ -174,17 +174,28 @@ export function AiKeysPage() {
           initial={editing}
           kinds={q.data?.kinds ?? []}
           onClose={() => setEditing(null)}
-          onSaved={async () => {
+          onSaved={async (id) => {
             setEditing(null);
             await refresh();
+            setPicking(id);
           }}
+        />
+      )}
+      {picking && <ProviderModelsModal providerId={picking} onClose={() => setPicking(null)} />}
+      {deleting && (
+        <SafeDeleteModal
+          what={`the AI key ${deleting}`}
+          checkPath={`/ai-keys/${encodeURIComponent(deleting)}/delete-check`}
+          deletePath={`/ai-keys/${encodeURIComponent(deleting)}`}
+          onClose={() => setDeleting(null)}
+          onDeleted={refresh}
         />
       )}
     </>
   );
 }
 
-export function KeyModal({ initial, kinds, onClose, onSaved }: { initial: { provider_id: string; kind: string; base_url: string }; kinds: string[]; onClose: () => void; onSaved: () => Promise<void> }) {
+export function KeyModal({ initial, kinds, onClose, onSaved }: { initial: { provider_id: string; kind: string; base_url: string }; kinds: string[]; onClose: () => void; onSaved: (providerId: string) => Promise<void> }) {
   const isNew = !initial.provider_id;
   const [f, setF] = useState({ ...initial, key: "" });
   const [busy, setBusy] = useState(false);
@@ -230,8 +241,8 @@ export function KeyModal({ initial, kinds, onClose, onSaved }: { initial: { prov
               setBusy(true);
               try {
                 await api.post("/ai-keys", { provider_id: f.provider_id.trim(), kind: f.kind, key: f.key.trim(), base_url: f.base_url.trim() || null });
-                notifyOk("AI key saved. Use Test to check it works.");
-                await onSaved();
+                notifyOk("The provider accepted the key; it is saved.");
+                await onSaved(f.provider_id.trim());
               } catch (e) {
                 notifyError(e);
               } finally {

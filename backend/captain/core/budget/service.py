@@ -39,13 +39,16 @@ class InMemoryBudgetCatalog:
         self.rates: dict[str, RateLimitDefinition] = {}
 
     def add(self, d: BudgetDefinition) -> None:
-        self.budgets.setdefault(d.scope, []).append(d)
+        self.budgets[d.scope] = [d]  # one budget per scope: saving again edits it
 
     def add_rate(self, r: RateLimitDefinition) -> None:
         self.rates[r.scope] = r
 
     def remove_rate(self, scope: str) -> bool:
         return self.rates.pop(scope, None) is not None
+
+    def remove(self, scope: str) -> bool:
+        return self.budgets.pop(scope, None) is not None
 
     def budgets_for(self, scopes: tuple[str, ...]) -> list[BudgetDefinition]:
         return [d for s in scopes for d in self.budgets.get(s, [])]

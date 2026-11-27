@@ -16,6 +16,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api, type UserView } from "../api";
+import { SafeDeleteModal } from "../components/SafeDelete";
 import { TeamInput } from "../components/TeamInput";
 import { can, useMe, useStixis, roleText } from "../App";
 import {
@@ -75,15 +76,9 @@ export function UsersPage() {
   });
   const write = can(me, "users:write");
   const [editing, setEditing] = useState<UserView | "new" | null>(null);
+  const [leaving, setLeaving] = useState<UserView | null>(null);
 
   const setActive = async (u: UserView, active: boolean) => {
-    if (
-      !active &&
-      !window.confirm(
-        `Deactivate ${u.email}? Their console access ends and all their Captain keys are revoked.`,
-      )
-    )
-      return;
     try {
       const r = await api.put<UserView>(`/users/${encodeURIComponent(u.id)}`, {
         active,
@@ -120,6 +115,31 @@ export function UsersPage() {
           )
         }
       />
+      {leaving && (
+        <SafeDeleteModal
+          what={`${leaving.name} (${leaving.email})`}
+          actionLabel="Deactivate"
+          checkPath={`/users/${encodeURIComponent(leaving.id)}/delete-check`}
+          effect="Their console access ends. They are kept (not erased) and can be reactivated; their activity stays in reports."
+          details={(c) =>
+            c.active_keys ? (
+              <Text size="sm">
+                Their {c.active_keys} active Captain key(s) will be revoked.
+              </Text>
+            ) : null
+          }
+          onConfirm={() =>
+            api.put(`/users/${encodeURIComponent(leaving.id)}`, { active: false })
+          }
+          onClose={() => setLeaving(null)}
+          onDeleted={() =>
+            Promise.all([
+              qc.invalidateQueries({ queryKey: ["users"] }),
+              qc.invalidateQueries({ queryKey: ["keys"] }),
+            ])
+          }
+        />
+      )}
       <UserModal
         key={
           editing === null ? "closed" : editing === "new" ? "new" : editing.id
@@ -192,7 +212,7 @@ export function UsersPage() {
                             size="xs"
                             color="red"
                             variant="light"
-                            onClick={() => void setActive(u, false)}
+                            onClick={() => setLeaving(u)}
                           >
                             Deactivate
                           </Button>

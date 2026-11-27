@@ -179,6 +179,10 @@ class RegistryService:
     def provider(self, id: str) -> Provider | None:
         return self._s.provider(id)
 
+    def model(self, alias: str) -> ModelEntry | None:
+        """The model entry as stored, switched on or off."""
+        return self._s.model(alias)
+
     # -------------------------------------------------------------- writes
     def upsert_provider(self, p: Provider) -> None:
         self._s.put_provider(p)

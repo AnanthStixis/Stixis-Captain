@@ -3,6 +3,8 @@
     GET    /admin/v1/ai-keys                       providers and whether each has a key
     POST   /admin/v1/ai-keys                       add or replace the key for a provider
     POST   /admin/v1/ai-keys/{provider_id}/test    one cheap call to check the key works
+    GET    /admin/v1/ai-keys/{provider_id}/models  the provider's chat models, live, with
+                                                   suggested prices and what is added
     DELETE /admin/v1/ai-keys/{provider_id}         remove the key (the provider stops)
 
 The key is never returned, logged or written to the evidence ledger: only the provider,
@@ -28,6 +30,7 @@ from captain.core.identity.rbac import Permission, require
 from captain.core.models import EventType
 from captain.core.registry.service import Provider, ProviderKind
 from captain.core.secrets_store import REF_PREFIX, SecretsService, secret_view
+from captain.core.usage.list_prices import PRICE_FEED_URL, PriceFeed, is_chat_model
 
 # Where each kind of provider is reached when the admin does not give an address.
 DEFAULT_URLS: dict[str, str] = {
@@ -36,6 +39,7 @@ DEFAULT_URLS: dict[str, str] = {
     ProviderKind.GEMINI: "https://generativelanguage.googleapis.com/v1beta/openai",
     ProviderKind.MISTRAL: "https://api.mistral.ai/v1",
 }
+REJECTED = "The provider rejected this key."
 NEEDS_URL = {ProviderKind.AZURE_OPENAI, ProviderKind.SELF_HOSTED, ProviderKind.COHERE}
 NOT_KEY_BASED = {ProviderKind.BEDROCK}  # AWS credentials, not an API key
 
@@ -47,6 +51,8 @@ class AiKeyBody(BaseModel):
     key: SecretStr
     base_url: str | None = Field(default=None, max_length=300)
     region: str = Field(default="external", max_length=40)
+    # Save even when the provider cannot be reached right now (a rejected key never saves).
+    skip_check: bool = False
 
 
 def _check_url(url: str) -> str:
@@ -65,9 +71,42 @@ def install_aikey_routes(
     actor_dep: Callable[..., AdminActor],
     secrets: SecretsService | None,
     http: httpx.Client | None = None,
+    price_feed_url: str | None = None,
 ) -> None:
     Actor = Annotated[AdminActor, Depends(actor_dep)]
     client = http or httpx.Client(timeout=10)
+    if price_feed_url is None:  # CAPTAIN_PRICE_FEED_URL="" switches the public list off
+        from captain.envfile import current_env
+
+        price_feed_url = current_env().get("CAPTAIN_PRICE_FEED_URL", PRICE_FEED_URL)
+    feed = PriceFeed(client, price_feed_url)
+
+    def ask_provider(kind: ProviderKind, base: str, key: str) -> tuple[bool, str, list[str]]:
+        """List the provider's models with this key: (works, message, model ids)."""
+        if kind is ProviderKind.ANTHROPIC:
+            headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+        elif kind is ProviderKind.AZURE_OPENAI:
+            headers = {"api-key": key}
+        else:
+            headers = {"Authorization": f"Bearer {key}"}
+        url = f"{base.rstrip('/')}/models"
+        if kind is ProviderKind.ANTHROPIC:
+            url += "?limit=1000"
+        try:
+            r = client.get(url, headers=headers)
+        except httpx.HTTPError as e:
+            return False, f"The provider could not be reached ({type(e).__name__}).", []
+        if r.status_code in (401, 403):
+            return False, REJECTED, []
+        if r.status_code >= 400:
+            return False, f"The provider answered with an error ({r.status_code}).", []
+        try:
+            body = r.json()
+            data = body.get("data") or body.get("models") or []
+            ids = sorted({str(m.get("id") or m.get("name") or "") for m in data} - {""})
+        except (ValueError, AttributeError):
+            ids = []
+        return True, "The key works.", ids
 
     def registry() -> Any:
         reg = built.core.m.registry
@@ -133,6 +172,10 @@ def install_aikey_routes(
         url = _check_url(url) if url else None
         reg = registry()
         old = reg.provider(body.provider_id)
+        # Check the key with the provider before storing it.
+        ok, msg, _ = ask_provider(body.kind, url or "", body.key.get_secret_value())
+        if not ok and (msg == REJECTED or not body.skip_check):
+            raise HTTPException(400, {"error": "KEY_NOT_ACCEPTED", "message": msg})
         try:
             new = svc.put(body.provider_id, body.key.get_secret_value(), a.id)
         except ValueError as e:
@@ -154,38 +197,56 @@ def install_aikey_routes(
         p = registry().provider(provider_id)
         if p is None or not (sid := stored_id(p)):
             raise HTTPException(404, {"error": "NOT_FOUND", "message": "no stored key"})
-        key = svc.reveal(sid)
-        base = (p.base_url or DEFAULT_URLS.get(p.kind) or "").rstrip("/")
-        if p.kind is ProviderKind.ANTHROPIC:
-            headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
-        elif p.kind is ProviderKind.AZURE_OPENAI:
-            headers = {"api-key": key}
-        else:
-            headers = {"Authorization": f"Bearer {key}"}
-        try:
-            r = client.get(f"{base}/models", headers=headers)
-        except httpx.HTTPError as e:
-            return {
-                "ok": False,
-                "message": f"The provider could not be reached ({type(e).__name__}).",
-            }
-        if r.status_code in (401, 403):
-            return {"ok": False, "message": "The provider rejected this key."}
-        if r.status_code >= 400:
-            return {
-                "ok": False,
-                "message": f"The provider answered with an error ({r.status_code}).",
-            }
-        return {"ok": True, "message": "The key works."}
+        base = p.base_url or DEFAULT_URLS.get(p.kind) or ""
+        ok, msg, _ = ask_provider(p.kind, base, svc.reveal(sid))
+        return {"ok": ok, "message": msg}
+
+    @app.get("/admin/v1/ai-keys/{provider_id}/models")
+    def provider_models(a: Actor, provider_id: str) -> dict[str, Any]:
+        """The provider's chat models, fetched live with the stored key, each with a
+        suggested list price (to check) and whether Captain already has it."""
+        require(a.roles, Permission.REGISTER_READ)
+        svc = need()
+        p = registry().provider(provider_id)
+        if p is None or not (sid := stored_id(p)):
+            raise HTTPException(404, {"error": "NOT_FOUND", "message": "no stored key"})
+        base = p.base_url or DEFAULT_URLS.get(p.kind) or ""
+        ok, msg, ids = ask_provider(p.kind, base, svc.reveal(sid))
+        if not ok:
+            raise HTTPException(502, {"error": "PROVIDER", "message": msg})
+        have = {
+            str(m.get("provider_model")): str(m.get("alias"))
+            for m in queries.registry("model")
+            if m.get("provider_id") == provider_id and m.get("active", True)
+        }
+        out = []
+        for mid in ids:
+            if not is_chat_model(mid):
+                continue
+            name = mid.removeprefix("models/")
+            found = feed.price(str(p.kind.value), name)
+            out.append({
+                "id": name,
+                "added_as": have.get(name) or have.get(mid),
+                "suggested_price": None if found is None
+                else {"input_usd_per_m": found[0][0], "output_usd_per_m": found[0][1],
+                      "source": found[1]},
+            })  # fmt: skip
+        return {"provider_id": provider_id, "models": out}
 
     @app.delete("/admin/v1/ai-keys/{provider_id}")
-    def delete_key(a: Actor, provider_id: str) -> dict[str, Any]:
+    def delete_key(a: Actor, provider_id: str, confirm_in_use: bool = False) -> dict[str, Any]:
+        """Soft delete: the provider is switched off and its key destroyed; refused while
+        models still use it (admin_deletes)."""
+        from captain.api.admin_deletes import provider_check, refuse_unless_safe
+
         require(a.roles, Permission.AIKEYS_WRITE)
         svc = need()
         reg = registry()
         p = reg.provider(provider_id)
         if p is None or not (sid := stored_id(p)):
             raise HTTPException(404, {"error": "NOT_FOUND", "message": "no stored key"})
+        refuse_unless_safe(provider_check(queries, provider_id), confirm_in_use)
         record(a, provider_id, "removed")  # recorded before it takes effect
         admin.upsert_registry(
             a,

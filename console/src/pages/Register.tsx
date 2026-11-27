@@ -18,6 +18,7 @@ import { IconPlus } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { SafeDeleteModal } from "../components/SafeDelete";
 import { api, ApiError, type RegisterEntry, type UserView } from "../api";
 import { can, useMe } from "../App";
 import {
@@ -73,11 +74,13 @@ const AUTONOMY_NAME: Record<string, string> = Object.fromEntries(
 
 export function RegisterPage() {
   const me = useMe().data;
+  const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["register"],
     queryFn: () => api.get<RegisterEntry[]>("/register"),
   });
   const [edit, setEdit] = useState<RegisterEntry | "new" | null>(null);
+  const [retiring, setRetiring] = useState<RegisterEntry | null>(null);
   const write = can(me, "register:write");
   return (
     <>
@@ -158,13 +161,36 @@ export function RegisterPage() {
                   </Table.Td>
                   <Table.Td>
                     {write && (
-                      <Button
-                        size="xs"
-                        variant="default"
-                        onClick={() => setEdit(e)}
-                      >
-                        Edit
-                      </Button>
+                      <Group gap={4} wrap="nowrap">
+                        <Button
+                          size="xs"
+                          variant="default"
+                          onClick={() => setEdit(e)}
+                        >
+                          Edit
+                        </Button>
+                        {e.active ? (
+                          <Button size="xs" color="red" variant="light" onClick={() => setRetiring(e)}>
+                            Retire
+                          </Button>
+                        ) : (
+                          <Button
+                            size="xs"
+                            variant="light"
+                            onClick={async () => {
+                              try {
+                                await api.put(`/register/${e.id}`, { entry: { ...e, active: true }, approval_ref: null });
+                                notifyOk(`${e.name} is active again`);
+                                await qc.invalidateQueries({ queryKey: ["register"] });
+                              } catch (err) {
+                                notifyError(err);
+                              }
+                            }}
+                          >
+                            Restore
+                          </Button>
+                        )}
+                      </Group>
                     )}
                   </Table.Td>
                 </Table.Tr>
@@ -173,6 +199,17 @@ export function RegisterPage() {
           </Table>
         </ScrollArea>
       </QueryState>
+      {retiring && (
+        <SafeDeleteModal
+          what={`the AI use ${retiring.name}`}
+          actionLabel="Retire"
+          checkPath={`/register/${encodeURIComponent(retiring.id)}/delete-check`}
+          deletePath={`/register/${encodeURIComponent(retiring.id)}`}
+          effect="No new keys can be made for it. It is kept, with its history, and can be restored."
+          onClose={() => setRetiring(null)}
+          onDeleted={() => qc.invalidateQueries({ queryKey: ["register"] })}
+        />
+      )}
       {edit && (
         <EntryModal
           entry={edit === "new" ? null : edit}

@@ -34,6 +34,7 @@ import {
   ReasonModal,
 } from "../components/common";
 import { money, pct } from "../format";
+import { SafeDeleteModal } from "../components/SafeDelete";
 import { RateLimitsSection } from "./RateLimits";
 
 export function BudgetsPage() {
@@ -44,6 +45,8 @@ export function BudgetsPage() {
     queryFn: () => api.get<Budget[]>("/budgets"),
   });
   const [edit, setEdit] = useState(false);
+  const [editing, setEditing] = useState<Budget | null>(null);
+  const [removing, setRemoving] = useState<Budget | null>(null);
   const [override, setOverride] = useState<Budget | null>(null);
   const [extra, setExtra] = useState<number | string>(10);
 
@@ -129,6 +132,12 @@ export function BudgetsPage() {
                       )}
                     </Table.Td>
                     <Table.Td>
+                      <Group gap={4} wrap="nowrap">
+                      {can(me, "budget:write") && (
+                        <Button size="xs" variant="default" onClick={() => setEditing(b)}>
+                          Edit
+                        </Button>
+                      )}
                       {can(me, "budget:override") && (
                         <Button
                           size="xs"
@@ -138,6 +147,12 @@ export function BudgetsPage() {
                           Override
                         </Button>
                       )}
+                      {can(me, "budget:write") && (
+                        <Button size="xs" color="red" variant="light" onClick={() => setRemoving(b)}>
+                          Delete
+                        </Button>
+                      )}
+                      </Group>
                     </Table.Td>
                   </Table.Tr>
                 );
@@ -152,6 +167,29 @@ export function BudgetsPage() {
         onClose={() => setEdit(false)}
         onSaved={() => qc.invalidateQueries({ queryKey: ["budgets"] })}
       />
+      {editing && (
+        <BudgetModal
+          opened
+          initial={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => qc.invalidateQueries({ queryKey: ["budgets"] })}
+        />
+      )}
+      {removing && (
+        <SafeDeleteModal
+          what={`the spending limit for ${removing.scope}`}
+          checkPath={`/budgets/delete-check?scope=${encodeURIComponent(removing.scope)}`}
+          deletePath={`/budgets?scope=${encodeURIComponent(removing.scope)}`}
+          effect="The limit is removed; spending already recorded stays in reports and the audit trail."
+          details={(c) =>
+            c.spent_micros ? (
+              <Text size="sm">{money(c.spent_micros)} has been spent against it this period.</Text>
+            ) : null
+          }
+          onClose={() => setRemoving(null)}
+          onDeleted={() => qc.invalidateQueries({ queryKey: ["budgets"] })}
+        />
+      )}
       <ReasonModal
         opened={!!override}
         onClose={() => setOverride(null)}
@@ -199,10 +237,12 @@ export function BudgetModal({
   opened,
   onClose,
   onSaved,
+  initial,
 }: {
   opened: boolean;
   onClose: () => void;
   onSaved: () => void;
+  initial?: Budget; // edit: what it applies to stays; period, limit and type change
 }) {
   const org = useQuery({
     queryKey: ["organization"],
@@ -229,11 +269,15 @@ export function BudgetModal({
     queryFn: () => api.get<{ alias: string }[]>("/registry/model"),
     enabled: opened,
   });
-  const [kind, setKind] = useState<string>("org");
-  const [target, setTarget] = useState("");
-  const [period, setPeriod] = useState<string | null>("MONTHLY");
-  const [usd, setUsd] = useState<number | string>(100);
-  const [hard, setHard] = useState(true);
+  const [kind, setKind] = useState<string>(initial?.scope.split(":")[0] ?? "org");
+  const [target, setTarget] = useState(
+    initial ? initial.scope.slice(initial.scope.indexOf(":") + 1) : "",
+  );
+  const [period, setPeriod] = useState<string | null>(initial?.period ?? "MONTHLY");
+  const [usd, setUsd] = useState<number | string>(
+    initial ? initial.limit_micros / 1_000_000 : 100,
+  );
+  const [hard, setHard] = useState(initial?.hard ?? true);
   const [busy, setBusy] = useState(false);
   const uniq = (xs: (string | null | undefined)[]) =>
     [...new Set(xs.filter((x): x is string => !!x))].sort();
@@ -247,11 +291,20 @@ export function BudgetModal({
     ]),
     model: uniq((models.data ?? []).map((m) => m.alias)),
   };
-  const value =
-    kind === "org" ? (org.data?.org_id ?? "default") : target.trim();
+  const value = initial
+    ? target
+    : kind === "org"
+      ? (org.data?.org_id ?? "default")
+      : target.trim();
   return (
-    <Modal opened={opened} onClose={onClose} title="Set a budget" centered>
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title={initial ? `Edit the limit for ${initial.scope}` : "Set a budget"}
+      centered
+    >
       <Stack>
+        {!initial && (
         <Select
           label="Applies to"
           description="A company-wide limit is the simplest start."
@@ -263,7 +316,8 @@ export function BudgetModal({
           }}
           allowDeselect={false}
         />
-        {kind !== "org" && (
+        )}
+        {!initial && kind !== "org" && (
           <Autocomplete
             label="Which one"
             placeholder="Pick or type"

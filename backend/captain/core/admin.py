@@ -200,6 +200,16 @@ class AdminService:
         )
         return bool(self._budgets.remove_rate(scope))  # type: ignore[attr-defined]
 
+    def remove_budget(self, actor: AdminActor, scope: str) -> bool:
+        """Removing a spending limit is a weakening change: recorded BEFORE it takes effect."""
+        require(actor.roles, Permission.BUDGET_WRITE)
+        self._ledger.enqueue(
+            admin_event(
+                EventType.BUDGET_DEFINED, actor.id, {"kind": "budget_removed", "scope": scope}
+            )
+        )
+        return bool(self._budgets.remove(scope))  # type: ignore[attr-defined]
+
     def override_budget(self, actor: AdminActor, scope: str, extra: int, reason: str) -> None:
         require(actor.roles, Permission.BUDGET_OVERRIDE)
         if extra <= 0 or not reason.strip():
