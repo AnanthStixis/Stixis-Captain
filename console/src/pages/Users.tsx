@@ -16,6 +16,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api, type UserView } from "../api";
+import { TeamInput } from "../components/TeamInput";
 import { can, useMe, useStixis, roleText } from "../App";
 import {
   notifyError,
@@ -262,6 +263,7 @@ function UserModal({
               });
             notifyOk(isNew ? "User added" : "User updated");
             await qc.invalidateQueries({ queryKey: ["users"] });
+            await qc.invalidateQueries({ queryKey: ["teams"] });
             onClose();
           } catch (err) {
             notifyError(err);
@@ -295,12 +297,7 @@ function UserModal({
               value={jobTitle}
               onChange={setJobTitle}
             />
-            <TextInput
-              label="Team or department"
-              placeholder="e.g. Payments"
-              value={team}
-              onChange={(e) => setTeam(e.currentTarget.value)}
-            />
+            <TeamInput value={team} onChange={setTeam} />
           </Group>
           <Checkbox.Group
             label="Access to the Captain console"

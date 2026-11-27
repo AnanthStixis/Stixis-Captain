@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api, type Overview } from "../api";
-import { PageHeader, QueryState, RiskBadge, StatCard } from "../components/common";
+import { PageHeader, QueryState, StatCard } from "../components/common";
 import { money, when } from "../format";
 
 export function OverviewPage() {
@@ -35,24 +35,14 @@ export function OverviewPage() {
         {o && (
           <Stack>
             <SimpleGrid cols={{ base: 1, xs: 2, md: 4 }}>
-              <StatCard label="Governed calls" value={o.governed_calls.toLocaleString()} hint={`${o.observed_events} observed-only events`} />
-              <StatCard label="Refused" value={refused.toLocaleString()} color={refused ? "red" : undefined} hint="Blocked before reaching a model" />
+              <StatCard label="AI calls" value={o.governed_calls.toLocaleString()} />
+              <StatCard label="Refused" value={refused.toLocaleString()} color={refused ? "red" : undefined} hint="Stopped by your rules" />
               <StatCard
                 label="Spend"
                 value={money(o.spend_micros)}
-                hint={o.estimated_spend_micros ? `includes ${money(o.estimated_spend_micros)} estimated` : "all provider-reported"}
+                hint={o.estimated_spend_micros ? `includes ${money(o.estimated_spend_micros)} estimated` : undefined}
               />
-              <StatCard
-                label="Latency (Captain + model)"
-                value={o.latency_ms.p50 != null ? `${o.latency_ms.p50} ms` : "—"}
-                hint={o.latency_ms.p95 != null ? `p95 ${o.latency_ms.p95} ms` : "no calls yet"}
-              />
-            </SimpleGrid>
-            <SimpleGrid cols={{ base: 1, xs: 2, md: 4 }}>
               <StatCard label="Approvals pending" value={o.approvals_pending} color={o.approvals_pending ? "yellow" : undefined} />
-              <StatCard label="Kill switches active" value={o.kill_switches_active} color={o.kill_switches_active ? "red" : undefined} />
-              <StatCard label="Input tokens" value={o.tokens.input.toLocaleString()} />
-              <StatCard label="Output tokens" value={o.tokens.output.toLocaleString()} />
             </SimpleGrid>
 
             <Paper withBorder p="md">
@@ -77,7 +67,7 @@ export function OverviewPage() {
             <SimpleGrid cols={{ base: 1, md: 2 }}>
               <Paper withBorder p="md">
                 <Title order={4} mb="sm">
-                  Refusals by reason
+                  Why calls were stopped
                 </Title>
                 <Table>
                   <Table.Tbody>
@@ -93,17 +83,7 @@ export function OverviewPage() {
               </Paper>
               <Paper withBorder p="md">
                 <Title order={4} mb="sm">
-                  Request risk
-                </Title>
-                <Group>
-                  {["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((r) => (
-                    <Group key={r} gap={6}>
-                      <RiskBadge value={r} />
-                      <Text fw={600}>{o.risk_levels[r] ?? 0}</Text>
-                    </Group>
-                  ))}
-                </Group>
-                <Title order={4} mt="lg" mb="sm">
+                  
                   Spend by model
                 </Title>
                 <Table>

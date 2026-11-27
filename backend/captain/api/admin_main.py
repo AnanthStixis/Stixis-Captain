@@ -27,9 +27,9 @@ from sqlalchemy import create_engine
 
 from captain.api.admin_auth import (
     AdminAuthenticator,
+    AdminKeyAuthenticator,
     AdminSsoConfig,
     ChainAuthenticator,
-    AdminKeyAuthenticator,
     DevTokenAuthenticator,
     OidcAdminAuthenticator,
 )

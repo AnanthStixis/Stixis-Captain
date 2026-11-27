@@ -21,7 +21,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from captain.api.admin_queries import AdminQueries
+from captain.api.admin_queries import AdminQueries, same_team, team_names
 from captain.api.org import (
     CHECKLIST_ITEMS,
     INVITE_SESSION_S,
@@ -216,6 +216,12 @@ def install_org_routes(
             user_view(p) for p in queries.principals() if str(p.type) == PrincipalType.USER.value
         ]
 
+    @app.get("/admin/v1/teams")
+    def list_teams(a: Actor) -> list[str]:
+        """Team names in use, for the pick lists on Users and Create a key."""
+        require(a.roles, Permission.KEYS_READ)
+        return team_names(queries)
+
     @app.post("/admin/v1/users")
     def add_user(a: Actor, body: NewUserBody) -> dict[str, Any]:
         require(a.roles, Permission.USERS_WRITE)
@@ -228,7 +234,7 @@ def install_org_routes(
             type=PrincipalType.USER.value,
             org_id=org_id(),
             display_name=body.name.strip(),
-            team_id=(body.team or "").strip() or None,
+            team_id=same_team(queries, body.team),
             roles=roles,
             job_title=(body.job_title or "").strip() or None,
         )
@@ -255,7 +261,7 @@ def install_org_routes(
             type=old.type,
             org_id=old.org_id,
             display_name=body.name.strip() if body.name is not None else old.display_name,
-            team_id=((body.team or "").strip() or None)
+            team_id=same_team(queries, body.team)
             if "team" in body.model_fields_set
             else old.team_id,
             idp_subject=old.idp_subject,

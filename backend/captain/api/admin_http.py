@@ -39,6 +39,7 @@ from captain.api.admin_queries import (
     event_view,
     key_view,
     principal_view,
+    same_team,
 )
 from captain.api.admin_sso import LOGIN_TTL_S, CsrfError, LoginCookie, SsoError, SsoService
 from captain.api.controlplane import CompanyStore, install_controlplane_routes
@@ -965,7 +966,7 @@ def create_admin_app(
         ctx = built.infra.context_store
         owner = built.infra.identity_store.get_principal(pid)
         org = owner.org_id if owner else "default"
-        proj = body.project_id.strip() or "general"
+        proj = same_team(queries, body.project_id) or "general"
         p = ctx.project(proj)
         if p is None:
             ctx.put_project(Project(proj, org, proj))

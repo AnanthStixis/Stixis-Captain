@@ -215,7 +215,7 @@ export function EntryModal({
   });
   const modelsQ = useQuery({
     queryKey: ["registry", "model"],
-    queryFn: () => api.get<{ id: string }[]>("/registry/model"),
+    queryFn: () => api.get<{ alias: string }[]>("/registry/model"),
   });
   const [name, setName] = useState(entry?.name ?? "");
   const [purpose, setPurpose] = useState(entry?.purpose ?? "");
@@ -299,7 +299,7 @@ export function EntryModal({
         <TagsInput
           label="Models it may use"
           description="Pick from Models & tools, or type a model name and press Enter. Requests for any other model are refused."
-          data={(modelsQ.data ?? []).map((m) => m.id)}
+          data={(modelsQ.data ?? []).map((m) => m.alias).filter(Boolean)}
           value={models}
           onChange={setModels}
           placeholder="e.g. gpt-4o, claude-sonnet"

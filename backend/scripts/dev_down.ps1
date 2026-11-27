@@ -1,5 +1,5 @@
 # Stop every Captain dev service (PostgreSQL is yours and is left running).
-$ports = 8000, 8080, 8090, 8100, 8200, 8181, 8300, 8310
+$ports = 8000, 8080, 8090, 8100, 8200, 8181, 8300, 8310, 8101, 8001
 foreach ($p in $ports) {
     $conn = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue
     foreach ($c in $conn) {

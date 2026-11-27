@@ -40,6 +40,7 @@ import {
   IconScale,
   IconShieldCheck,
   type Icon,
+  IconSettings,
 } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -110,7 +111,7 @@ export const NAV: NavItem[] = [
   },
   {
     path: "/usage",
-    label: "Usage by…",
+    label: "Usage",
     icon: IconUsers,
     needs: "usage:read",
     element: <UsageBreakdownPage />,
@@ -295,6 +296,21 @@ function AcceptInvite({ onDone }: { onDone: () => void }) {
     </Center>
   );
 }
+
+/** The company console's everyday menu, in this order. Every other page sits under
+ * "Advanced" (collapsed), so an org admin sees only what they need day to day. */
+const MAIN_MENU = [
+  "/setup",
+  "/",
+  "/activity",
+  "/usage",
+  "/users",
+  "/ai-keys",
+  "/registry",
+  "/budgets",
+  "/keys",
+  "/connect",
+];
 
 const STIXIS_MENU = [
   { path: "/stixis", label: "Dashboard" },
@@ -622,8 +638,11 @@ export function App() {
           </Group>
         </Group>
       </AppShell.Header>
-      <AppShell.Navbar p="xs">
-        {visible.map((n) => (
+      <AppShell.Navbar p="xs" style={{ overflowY: "auto" }}>
+        {(stixis
+          ? visible
+          : MAIN_MENU.flatMap((p) => visible.filter((n) => n.path === p))
+        ).map((n) => (
           <NavLink
             key={n.path}
             label={n.label}
@@ -635,6 +654,29 @@ export function App() {
             }}
           />
         ))}
+        {!stixis && visible.some((n) => !MAIN_MENU.includes(n.path)) && (
+          <NavLink
+            label="Advanced"
+            leftSection={<IconSettings size={18} />}
+            defaultOpened={!MAIN_MENU.includes(loc.pathname)}
+            childrenOffset={12}
+          >
+            {visible
+              .filter((n) => !MAIN_MENU.includes(n.path))
+              .map((n) => (
+                <NavLink
+                  key={n.path}
+                  label={n.label}
+                  leftSection={<n.icon size={16} />}
+                  active={loc.pathname === n.path}
+                  onClick={() => {
+                    nav(n.path);
+                    close();
+                  }}
+                />
+              ))}
+          </NavLink>
+        )}
       </AppShell.Navbar>
       <AppShell.Main>
         <Routes>

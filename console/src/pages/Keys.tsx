@@ -1,5 +1,6 @@
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Code,
@@ -28,6 +29,7 @@ import {
   ReasonModal,
 } from "../components/common";
 import { SetupSteps, useReadiness } from "../components/SetupSteps";
+import { TeamInput } from "../components/TeamInput";
 import { when } from "../format";
 
 interface Issued {
@@ -43,6 +45,14 @@ export function KeysPage() {
     queryKey: ["keys"],
     queryFn: () => api.get<KeyView[]>("/keys"),
   });
+  const people = useQuery({
+    queryKey: ["users"],
+    queryFn: () => api.get<UserView[]>("/users"),
+  });
+  const nameOf = (id: string) =>
+    id.startsWith("app:")
+      ? `App: ${id.slice(4)}`
+      : (people.data?.find((u) => u.id === id)?.name ?? id);
   const [issueOpen, setIssueOpen] = useState(false);
   const [issued, setIssued] = useState<Issued | null>(null);
   const [revoke, setRevoke] = useState<KeyView | null>(null);
@@ -94,9 +104,8 @@ export function KeysPage() {
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Key</Table.Th>
-                <Table.Th>For</Table.Th>
-                <Table.Th>Used for · tool</Table.Th>
-                <Table.Th>Stage</Table.Th>
+                <Table.Th>Who · team · tool</Table.Th>
+                <Table.Th>AI use</Table.Th>
                 <Table.Th>Status</Table.Th>
                 <Table.Th>Last used</Table.Th>
                 <Table.Th>Expires</Table.Th>
@@ -115,19 +124,20 @@ export function KeysPage() {
                     )}
                   </Table.Td>
                   <Table.Td>
-                    {k.principal_id.startsWith("app:")
-                      ? `App: ${k.principal_id.slice(4)}`
-                      : k.principal_id}
-                  </Table.Td>
-                  <Table.Td>
-                    {k.register_id}
+                    <Text size="sm" fw={500}>
+                      {nameOf(k.principal_id)}
+                    </Text>
                     <Text size="xs" c="dimmed">
-                      {TOOL_LABEL[k.application_id] ?? k.application_id}
+                      {[
+                        k.project_id && `${k.project_id} team`,
+                        TOOL_LABEL[k.application_id.split(".")[0] ?? ""] ??
+                          k.application_id.split(".")[0],
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </Text>
                   </Table.Td>
-                  <Table.Td>
-                    {STAGE_LABEL[k.environment] ?? k.environment}
-                  </Table.Td>
+                  <Table.Td>{k.register_id}</Table.Td>
                   <Table.Td>
                     <Badge
                       color={k.status === "ACTIVE" ? "teal" : "red"}
@@ -197,6 +207,7 @@ export function KeysPage() {
           setIssueOpen(false);
           setIssued(i);
           await qc.invalidateQueries({ queryKey: ["keys"] });
+          await qc.invalidateQueries({ queryKey: ["teams"] });
         }}
       />
       <Modal
@@ -263,14 +274,6 @@ const TOOLS = [
 const TOOL_LABEL: Record<string, string> = Object.fromEntries(
   TOOLS.map((t) => [t.value, t.label]),
 );
-const STAGES = [
-  { value: "DEVELOPMENT", label: "Trying out" },
-  { value: "QA", label: "Testing" },
-  { value: "PRODUCTION", label: "Real work" },
-];
-const STAGE_LABEL: Record<string, string> = Object.fromEntries(
-  STAGES.map((t) => [t.value, t.label]),
-);
 
 function IssueModal({
   opened,
@@ -298,9 +301,10 @@ function IssueModal({
   const [use, setUse] = useState<string | null>(null);
   const [tool, setTool] = useState<string | null>("vscode");
   const [team, setTeam] = useState("");
-  const [stage, setStage] = useState("DEVELOPMENT");
+  const stage = "DEVELOPMENT";
   const [expiry, setExpiry] = useState<string | null>("90");
   const [note, setNote] = useState("");
+  const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const uses = (reg.data ?? []).filter((r) => r.active);
   const chosenUse = use ?? (uses.length === 1 ? (uses[0]?.id ?? null) : null);
@@ -350,7 +354,7 @@ function IssueModal({
               onChange={(v) => {
                 setPerson(v);
                 const u = users.data?.find((x) => x.id === v);
-                if (u?.team && !team) setTeam(u.team);
+                setTeam(u?.team ?? "");
               }}
               searchable
               nothingFoundMessage="No such user: add them on the Users page first"
@@ -363,13 +367,32 @@ function IssueModal({
               onChange={(e) => setAppName(e.currentTarget.value)}
             />
           )}
+          <Group grow align="flex-start">
+            <TeamInput
+              label="Team"
+              description={
+                forWhom === "person"
+                  ? "Filled in from the person's team; costs are grouped by it"
+                  : "The team that owns this app; costs are grouped by it"
+              }
+              value={team}
+              onChange={setTeam}
+            />
+            <Select
+              label="Which tool will use it?"
+              data={TOOLS}
+              value={tool}
+              onChange={setTool}
+              allowDeselect={false}
+            />
+          </Group>
           {reg.data && uses.length === 0 ? (
             <Alert color="yellow">
               First describe at least one approved AI use on the{" "}
               <b>AI Register</b> page (for example "Coding assistant"). Every
               key belongs to one, so Captain knows which rules apply.
             </Alert>
-          ) : (
+          ) : (uses.length > 1 || more) && (
             <Select
               label="What is it for?"
               description="The approved AI use from the AI Register; its rules (models, data, budget) apply to this key"
@@ -382,34 +405,11 @@ function IssueModal({
               searchable
             />
           )}
+          <Anchor component="button" size="sm" onClick={() => setMore(!more)} ta="left">
+            {more ? "Fewer options" : "More options (AI use, expiry, note)"}
+          </Anchor>
+          {more && (
           <Group grow align="flex-start">
-            <Select
-              label="Which tool will use it?"
-              data={TOOLS}
-              value={tool}
-              onChange={setTool}
-              allowDeselect={false}
-            />
-            <TextInput
-              label="Team or project"
-              description="Used to group costs"
-              placeholder={chosen?.team ?? "general"}
-              value={team}
-              onChange={(e) => setTeam(e.currentTarget.value)}
-            />
-          </Group>
-          <Group grow align="flex-start">
-            <div>
-              <Text size="sm" fw={500} mb={4}>
-                Stage
-              </Text>
-              <SegmentedControl
-                fullWidth
-                data={STAGES}
-                value={stage}
-                onChange={setStage}
-              />
-            </div>
             <Select
               label="Stops working after"
               data={[
@@ -423,13 +423,14 @@ function IssueModal({
               onChange={setExpiry}
               allowDeselect={false}
             />
+            <TextInput
+              label="Note (optional)"
+              placeholder="e.g. Ravi's laptop"
+              value={note}
+              onChange={(e) => setNote(e.currentTarget.value)}
+            />
           </Group>
-          <TextInput
-            label="Note (optional)"
-            placeholder="e.g. Ravi's laptop"
-            value={note}
-            onChange={(e) => setNote(e.currentTarget.value)}
-          />
+          )}
           <Group justify="flex-end">
             <Button variant="default" onClick={onClose}>
               Cancel

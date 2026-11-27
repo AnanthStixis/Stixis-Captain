@@ -51,7 +51,7 @@ export function BudgetsPage() {
     <>
       <PageHeader
         title="Budgets"
-        description="Hard budgets refuse calls before they spend; soft budgets only alert. Every call must be covered by at least one hard budget."
+        description="A spending limit either stops AI calls when reached or only sends an alert. Every AI call needs at least one limit that stops calls."
         actions={
           <Group>
             <Button
@@ -83,7 +83,7 @@ export function BudgetsPage() {
               <Table.Tr>
                 <Table.Th>Scope</Table.Th>
                 <Table.Th>Period</Table.Th>
-                <Table.Th>Type</Table.Th>
+                <Table.Th>When reached</Table.Th>
                 <Table.Th w={260}>Used</Table.Th>
                 <Table.Th ta="right">Spent</Table.Th>
                 <Table.Th ta="right">Reserved</Table.Th>
@@ -103,7 +103,7 @@ export function BudgetsPage() {
                     <Table.Td>{b.period}</Table.Td>
                     <Table.Td>
                       <Badge variant="light" color={b.hard ? "indigo" : "gray"}>
-                        {b.hard ? "hard" : "soft"}
+                        {b.hard ? "Stops AI calls" : "Alert only"}
                       </Badge>
                     </Table.Td>
                     <Table.Td>
@@ -254,7 +254,7 @@ export function BudgetModal({
       <Stack>
         <Select
           label="Applies to"
-          description="Every AI call must be covered by at least one hard budget; a company-wide one is the simplest start."
+          description="A company-wide limit is the simplest start."
           data={APPLIES}
           value={kind}
           onChange={(v) => {

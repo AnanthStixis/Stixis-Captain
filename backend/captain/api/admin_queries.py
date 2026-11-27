@@ -313,6 +313,27 @@ class AdminQueries(Protocol):
     ) -> list[UsageRow]: ...
 
 
+def team_names(queries: AdminQueries) -> list[str]:
+    """Every team name in use: people's teams and the team/project on keys. One spelling
+    per name (first seen wins), so "Payments" and "payments" are one team."""
+    seen: dict[str, str] = {}
+    for p in queries.principals():
+        if p.team_id and p.team_id.strip():
+            seen.setdefault(p.team_id.strip().lower(), p.team_id.strip())
+    for k in queries.keys():
+        if k.project_id and k.project_id.strip():
+            seen.setdefault(k.project_id.strip().lower(), k.project_id.strip())
+    return sorted(seen.values(), key=str.lower)
+
+
+def same_team(queries: AdminQueries, name: str | None) -> str | None:
+    """The existing spelling of a team name typed in any case; new names stay as typed."""
+    n = (name or "").strip()
+    if not n:
+        return None
+    return next((t for t in team_names(queries) if t.lower() == n.lower()), n)
+
+
 class PgAdminQueries:
     def __init__(self, engine: Engine) -> None:
         self._e = engine
