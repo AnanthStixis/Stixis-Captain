@@ -30,7 +30,7 @@ COPY --from=console /console/dist /app/console
 COPY docs/guides /app/guides
 COPY deploy/qa/entrypoint.sh /app/entrypoint.sh
 # Even if the checkout used Windows line endings, the script must not.
-RUN sed -i 's/$//' /app/entrypoint.sh
+RUN sed -i "s/\r$//" /app/entrypoint.sh
 ENV CAPTAIN_CONSOLE_DIR=/app/console \
     CAPTAIN_GUIDES_DIR=/app/guides \
     CAPTAIN_ARTIFACTS_DIR=/app/artifacts \
