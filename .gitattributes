@@ -1,0 +1,5 @@
+# Linux scripts and container files must keep LF line endings on every checkout.
+*.sh text eol=lf
+Dockerfile text eol=lf
+deploy/** text eol=lf
+policies/** text eol=lf
