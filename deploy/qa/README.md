@@ -45,6 +45,28 @@ cp /path/to/wildcard.key edge/certs/wildcard.key
 ```
 `qa.env` (secrets) and `edge/Caddyfile` are generated and never committed.
 
+## 2b. QA by IP with HTTPS (no DNS, no bought certificate)
+```sh
+sh make-env.sh 10.0.0.16.nip.io internal 10.0.0.16
+```
+Stixis at `https://10.0.0.16`, companies at `https://<code>.10.0.0.16.nip.io` (nip.io turns
+any such name into 10.0.0.16). The proxy issues the certificates from its own QA authority;
+each tester's PC trusts that authority once (below). The VS Code extension sends Captain keys
+only over https, so this is the way to test it.
+
+### Trust the QA certificate (once per PC)
+On the server, after the first start:
+```sh
+docker compose --env-file qa.env cp edge:/data/caddy/pki/authorities/local/root.crt ./captain-qa-root.crt
+```
+Copy `captain-qa-root.crt` to the PC (WinSCP), then in PowerShell:
+```powershell
+certutil -user -addstore Root .\captain-qa-root.crt
+```
+(Windows asks to confirm; Chrome and Edge use it at once. Firefox: Settings → Privacy &
+Security → Certificates → View Certificates → Authorities → Import.) The certificate only
+vouches for this QA proxy; remove it with `certmgr.msc` when QA ends.
+
 ## 3. Start
 ```sh
 docker compose --env-file qa.env up -d

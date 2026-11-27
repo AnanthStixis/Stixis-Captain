@@ -350,7 +350,13 @@ def migrate_all() -> None:
         command.upgrade(cfg, "head")
     for code in t.all_codes():
         if code != PLATFORM:
-            t.provision(code)  # idempotent: creates what is missing, migrates the rest
+            url = t.provision(code)  # idempotent: creates what is missing, migrates the rest
+            doc = t.companies.get(code)
+            if doc is not None and doc.get("admin_url") != url:
+                # e.g. QA moved from http to https: sign-in links must use the new address
+                doc["admin_url"] = url
+                t.companies.put(doc)
+                print(f"company {code}: address now {url}")
             print(f"company {code}: up to date")
 
 

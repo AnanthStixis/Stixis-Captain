@@ -1,25 +1,27 @@
 #!/bin/sh
 # Create qa.env (fresh random secrets) and edge/Caddyfile for the shared Captain.
 #
-#   sh make-env.sh <base-domain> [certs|http]
+#   sh make-env.sh <base-domain> [certs|internal|http] [stixis-address]
 #   sh make-env.sh stixis.com certs
+#   sh make-env.sh 10.0.0.16.nip.io internal 10.0.0.16     # QA by IP, https, no DNS needed
 #
 # Stixis console:  https://captain.<base-domain>      (CAPTAIN_PLATFORM_HOST)
 # Each company:    https://<code>.<base-domain>        (no per-company setup at all)
 #
 # certs  a wildcard certificate for *.<base-domain> (covers captain.<base-domain> too):
 #        edge/certs/wildcard.crt + edge/certs/wildcard.key          <- recommended
+# internal  https with the proxy's own certificate authority (QA): trust its root certificate
+#           once on each tester's PC (deploy/qa/README.md, "Trust the QA certificate")
 # http   plain http (QA on a closed network only; sign-in cookies are not marked secure)
 # Existing files are never overwritten.
 set -e
-DOMAIN="$1"; TLS="${2:-certs}"
-[ -n "$DOMAIN" ] || { echo "usage: sh make-env.sh <base-domain> [certs|http]"; exit 2; }
-case "$TLS" in certs|http) ;; *) echo "tls: certs or http"; exit 2 ;; esac
+DOMAIN="$1"; TLS="${2:-certs}"; PLATFORM="${3:-captain.$1}"
+[ -n "$DOMAIN" ] || { echo "usage: sh make-env.sh <base-domain> [certs|internal|http] [stixis-address]"; exit 2; }
+case "$TLS" in certs|internal|http) ;; *) echo "tls: certs, internal or http"; exit 2 ;; esac
 [ -e qa.env ] && { echo "qa.env exists; not overwritten"; exit 1; }
 [ -e edge/Caddyfile ] && { echo "edge/Caddyfile exists; not overwritten"; exit 1; }
 hex() { od -An -N"$1" -tx1 /dev/urandom | tr -d ' \n'; }
 SCHEME=https; [ "$TLS" = "http" ] && SCHEME=http
-PLATFORM="captain.$DOMAIN"
 
 umask 077
 cat > qa.env <<EOF
@@ -51,6 +53,9 @@ mkdir -p edge/certs
 if [ "$TLS" = "certs" ]; then
   SITE="$PLATFORM, *.$DOMAIN"
   TLSLINE="	tls /etc/caddy/certs/wildcard.crt /etc/caddy/certs/wildcard.key"
+elif [ "$TLS" = "internal" ]; then
+  SITE="$PLATFORM, *.$DOMAIN"
+  TLSLINE="	tls internal"
 else
   SITE="http://$PLATFORM, http://*.$DOMAIN"
   TLSLINE=""
@@ -58,7 +63,8 @@ fi
 cat > edge/Caddyfile <<EOF
 # Shared Captain: Stixis at $PLATFORM, every company at <code>.$DOMAIN (written by make-env.sh)
 {
-	auto_https disable_redirects
+	# QA: no public certificate authority; http requests are redirected to https.
+	local_certs
 }
 
 $SITE {
