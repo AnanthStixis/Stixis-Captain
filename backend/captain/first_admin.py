@@ -34,7 +34,14 @@ def main() -> int:
         return 1
     email = normalise_email(a.email)
     roles = {"org-admin"} | ({"platform-admin"} if a.platform_admin else set())
-    built, settings = build_from_env()
+    if env.get("CAPTAIN_MULTI_TENANT") == "1":  # shared Captain: Stixis's own settings
+        from captain.envfile import tenant_env
+        from captain.tenancy import PLATFORM, Tenancy
+
+        with tenant_env(Tenancy(env).overrides(PLATFORM)):
+            built, settings = build_from_env()
+    else:
+        built, settings = build_from_env()
     ids = built.infra.identity_store
     p = ids.get_principal(email)
     if p is None:

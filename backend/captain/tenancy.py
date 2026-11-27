@@ -62,8 +62,12 @@ class Tenancy:
         self.base_url = self.env["CAPTAIN_DATABASE_URL"]
         self.engine = create_engine(self.base_url, pool_size=2, max_overflow=2, pool_pre_ping=True)
         self.companies = PgCompanyStore(self.engine)
-        self.secrets = build_secrets(load_settings(self.env), self.engine)
         self._known: dict[str, tuple[float, bool]] = {}
+        # No global ledger key or anchor folder in shared mode: each company (Stixis
+        # included) has its own, so read the shared settings with Stixis's.
+        self.secrets = None
+        platform = {**self.env, **self.overrides(PLATFORM)}
+        self.secrets = build_secrets(load_settings(platform), self.engine)
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------ who is it
