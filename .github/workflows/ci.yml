@@ -1,8 +1,8 @@
 name: ci
 
+# Manual only: GitHub → Actions → CI → Run workflow (no run on every push).
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
