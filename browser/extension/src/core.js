@@ -44,11 +44,25 @@ export function onUnreachable(failMode) {
     : { action: "block", message: "Captain could not be reached, so this message was not sent. Try again, or contact IT." };
 }
 
+/** Plain http is allowed for this machine, and for the exact address a package was
+ * downloaded from when that install is itself plain http (preset.allowPlainHttp: a closed
+ * test network). Never for any other address: the key would travel unencrypted. */
+export function addressAllowed(url, preset) {
+  const base = String(url || "").replace(/\/+$/, "");
+  if (base.startsWith("https://")) return true;
+  if (/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/.test(base)) return true;
+  if (!preset || !preset.allowPlainHttp || !preset.captainUrl || !base.startsWith("http://")) return false;
+  try {
+    return new URL(base).origin === new URL(preset.captainUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
 /** The request the background worker sends to the gateway. */
-export function buildRequest(captainUrl, key, site, text) {
+export function buildRequest(captainUrl, key, site, text, preset) {
   const base = String(captainUrl || "").replace(/\/+$/, "");
-  const local = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/.test(base);
-  if (!base.startsWith("https://") && !local) {
+  if (!addressAllowed(base, preset)) {
     throw new Error("Captain URL must use https (plain http is allowed only for this machine)");
   }
   if (!key) throw new Error("no Captain key configured");

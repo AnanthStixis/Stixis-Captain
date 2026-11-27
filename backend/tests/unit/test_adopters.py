@@ -190,3 +190,16 @@ def test_plain_http_is_allowed_only_in_packages_from_a_plain_http_install(tmp_pa
     assert allowed("http://glixify.10.0.0.16.nip.io") is True  # QA on a closed network
     assert allowed("https://abc.stixis.com") is False
     assert allowed("http://127.0.0.1:8000") is False  # this machine needs no exception
+
+
+def test_browser_package_allows_plain_http_only_from_a_plain_http_install(tmp_path: Path) -> None:
+    from captain.api.adopters import Urls, browser_zip
+
+    art = fake_artifacts(tmp_path)
+
+    def preset(gateway: str) -> dict[str, object]:
+        return dict(json.loads(unzip(browser_zip(art, Urls(gateway=gateway)))["preset.json"]))
+
+    assert preset("http://glixify.10.0.0.16.nip.io") == {
+        "captainUrl": "http://glixify.10.0.0.16.nip.io", "allowPlainHttp": True}  # fmt: skip
+    assert "allowPlainHttp" not in preset("https://abc.stixis.com")

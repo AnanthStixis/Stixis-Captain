@@ -178,7 +178,11 @@ def browser_zip(artifacts: Path, urls: Urls) -> bytes:
                 m["host_permissions"] = [f"{origin}/*"]
                 data = json.dumps(m, indent=2).encode()
             z.writestr(f.relative_to(dist).as_posix(), data)
-        z.writestr("preset.json", json.dumps({"captainUrl": urls.gateway}, indent=2))
+        preset: dict[str, object] = {"captainUrl": urls.gateway}
+        host = urlsplit(urls.gateway).hostname or ""
+        if urls.gateway.startswith("http://") and host not in ("127.0.0.1", "localhost"):
+            preset["allowPlainHttp"] = True  # the install itself is plain http (closed QA network)
+        z.writestr("preset.json", json.dumps(preset, indent=2))
     return out.getvalue()
 
 

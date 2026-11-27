@@ -1,4 +1,11 @@
+import { addressAllowed } from "./core.js";
+
 const $ = (id) => document.getElementById(id);
+let preset = {};
+fetch(chrome.runtime.getURL("preset.json"))
+  .then((r) => (r.ok ? r.json() : {}))
+  .then((p) => (preset = p || {}))
+  .catch(() => {});
 
 chrome.storage.local.get(["captainUrl", "captainKey", "failMode"]).then((v) => {
   $("url").value = v.captainUrl || "";
@@ -17,9 +24,10 @@ chrome.storage.local.get(["captainUrl", "captainKey", "failMode"]).then((v) => {
 
 $("save").addEventListener("click", async () => {
   const url = $("url").value.trim().replace(/\/+$/, "");
-  const local = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/.test(url);
-  if (!url.startsWith("https://") && !local) {
-    $("status").textContent = "The address must start with https://";
+  if (!addressAllowed(url, preset)) {
+    $("status").textContent = preset.allowPlainHttp
+      ? `Use https://, or exactly ${preset.captainUrl} (the test address this extension came from).`
+      : "The address must start with https://";
     return;
   }
   await chrome.storage.local.set({ captainUrl: url, captainKey: $("key").value.trim(), failMode: $("fail").value });

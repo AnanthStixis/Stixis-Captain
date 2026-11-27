@@ -67,3 +67,12 @@ test("the manifest is limited to the watched sites and the one Captain address",
   assert.throws(() => manifestFor("https://captain.example.com", []), /site/);
   assert.throws(() => manifestFor("https://captain.example.com", ["a.com/../x"]), /bad site/);
 });
+
+test("plain http only for the exact test address the package came from", () => {
+  const qa = { captainUrl: "http://glixify.10.0.0.16.nip.io", allowPlainHttp: true };
+  assert.throws(() => buildRequest("http://glixify.10.0.0.16.nip.io", "k", "a.com", "x"), /https/);
+  assert.doesNotThrow(() => buildRequest("http://glixify.10.0.0.16.nip.io/", "k", "a.com", "x", qa));
+  assert.throws(() => buildRequest("http://evil.example", "k", "a.com", "x", qa), /https/);
+  // a preset without the flag (an https install's package): still refused
+  assert.throws(() => buildRequest(qa.captainUrl, "k", "a.com", "x", { captainUrl: qa.captainUrl }), /https/);
+});

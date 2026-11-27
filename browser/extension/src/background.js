@@ -17,6 +17,7 @@ async function config() {
     captainUrl: managed.captainUrl || local.captainUrl || preset.captainUrl,
     captainKey: managed.captainKey || local.captainKey,
     failMode: managed.failMode || local.failMode || "closed",
+    preset,
   };
 }
 
@@ -25,7 +26,7 @@ async function check(site, text) {
   if (tooLong(text)) return { action: "block", message: "This message is too long to check." };
   let req;
   try {
-    req = buildRequest(cfg.captainUrl, cfg.captainKey, site, text);
+    req = buildRequest(cfg.captainUrl, cfg.captainKey, site, text, cfg.preset);
   } catch (e) {
     return { action: "block", message: `Captain is not set up on this browser: ${e.message}` };
   }
